@@ -113,6 +113,7 @@ def main(argv=None):
             result = client.fetch(binding, config=config)
             if not result.collected:
                 report = _summary("FAILED", (result.reason.value,))
+                report.update(failed_endpoint=result.failed_endpoint, http_status=result.http_status)
             else:
                 failures = _identity_failures(result.bundle, args, int(time.time()))
                 report = _summary("FAILED" if failures else "CONNECTED", failures, matched=not failures)
