@@ -1,13 +1,17 @@
-"""Read-only diagnostics for market-frame-proposal-v0; never trade authorization.
+"""Read-only v0/v1 frame diagnostics; never trade authorization.
 
-Input is a passive attribute record, not a shared schema. No wallex.market import
-is needed. See the Strategy README for the exact local boundary and limitations.
+V0 is a passive attribute interface without a mandatory Market import. V1 uses
+Market validation helpers lazily. Neither is an approved shared contract.
 """
 
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from wallex.market.frame_v1 import MarketFrameV1
 
 from .engine import Signal
 from .indicators import (
@@ -67,13 +71,14 @@ _EXECUTION_BLOCKERS = (
 class HistoryDiagnostics:
     """Exact OHLC projection plus aligned base-volume and provenance claims.
 
-    timeframe explicitly maps the source Enum's name/seconds to Strategy's Enum.
-    volumes_base[i] belongs to candles[i]. No source objects are retained.
+    timeframe explicitly maps source name/seconds to Strategy's Enum.
+    volumes_base[i] belongs to candles[i]. V1 has no dataset byte digest; its
+    validated receipt/source/Quote/Depth evidence is in FrameMetadata.v1_evidence.
     """
 
     symbol: str
     timeframe: Timeframe
-    dataset_sha256: str
+    dataset_sha256: str | None
     candles: tuple[Candle, ...]
     volumes_base: tuple[Decimal, ...]
 
@@ -89,13 +94,14 @@ class FrameMetadata:
     h1: HistoryDiagnostics
     data_quality: str
     quality_reasons: tuple[str, ...]
-    event_time: None = None
-    received_time: None = None
-    best_bid: None = None
-    best_ask: None = None
-    spread_pct: None = None
+    event_time: int | None = None
+    received_time: int | None = None
+    best_bid: Decimal | None = None
+    best_ask: Decimal | None = None
+    spread_pct: Decimal | None = None
     depth_valid: bool = False
-    snapshot_hash: None = None
+    snapshot_hash: str | None = None
+    v1_evidence: "MarketFrameV1 | None" = None
 
 
 @dataclass(frozen=True)
@@ -172,8 +178,56 @@ def _history(
     return HistoryDiagnostics(symbol, timeframe, digest, candles, tuple(volumes))
 
 
+def _metadata_v1(frame: object) -> FrameMetadata:
+    # Import only for an explicitly labelled v1 input; v0 stays independent.
+    from wallex.market.frame_v1 import (
+        FrameV1Error, MarketFrameV1, QualityV1, build_market_frame_v1,
+        canonical_frame_json, verify_snapshot_hash,
+    )
+    if type(frame) is not MarketFrameV1:
+        raise _Rejected(DiagnosticReason.INVALID_FRAME, "frame")
+    if not verify_snapshot_hash(frame):
+        raise _Rejected(DiagnosticReason.INVALID_PROVENANCE, "snapshot_hash")
+    try:
+        validated = build_market_frame_v1(
+            frame.candles_15m, frame.candles_1h, symbol=frame.symbol,
+            base_asset=frame.base_asset, quote_asset=frame.quote_asset,
+            as_of=frame.as_of, quote=frame.quote, depth=frame.depth, policy=frame.policy,
+        )
+    except FrameV1Error as exc:
+        raise _Rejected(DiagnosticReason.INVALID_MARKET_EVIDENCE, exc.field or "frame") from exc
+    # A hash verifies bytes, not semantics. Rebuild derived fields with Market's
+    # existing validator and compare canonical forms (so 0 cannot equal False).
+    if canonical_frame_json(frame) != canonical_frame_json(validated):
+        raise _Rejected(DiagnosticReason.INVALID_MARKET_EVIDENCE, "frame")
+    if frame.quality is not QualityV1.COMPLETE or frame.quality_reasons:
+        raise _Rejected(DiagnosticReason.FRAME_QUALITY_INCOMPLETE, "quality")
+
+    def project(observations, timeframe):
+        bars = tuple(item.candle for item in observations)
+        return HistoryDiagnostics(
+            validated.symbol, timeframe, None,
+            tuple(Candle(b.timestamp, b.open, b.high, b.low, b.close, b.completed) for b in bars),
+            tuple(b.volume for b in bars),
+        )
+
+    return FrameMetadata(
+        validated.schema_version, validated.symbol, validated.base_asset,
+        validated.quote_asset, validated.as_of,
+        project(validated.candles_15m, Timeframe.M15),
+        project(validated.candles_1h, Timeframe.H1), validated.quality.value,
+        tuple(r.value for r in validated.quality_reasons),
+        event_time=validated.event_time, received_time=validated.received_time,
+        best_bid=validated.quote.best_bid, best_ask=validated.quote.best_ask,
+        spread_pct=validated.spread_pct, depth_valid=validated.depth_valid,
+        snapshot_hash=validated.snapshot_hash, v1_evidence=validated,
+    )
+
+
 def _metadata(frame: object) -> FrameMetadata:
     version = frame.schema_version
+    if type(version) is str and version == "marketframe-v1":
+        return _metadata_v1(frame)
     if type(version) is not str or version != SUPPORTED_SCHEMA:
         raise _Rejected(DiagnosticReason.UNSUPPORTED_SCHEMA, "schema_version")
     symbol, base, quote = frame.symbol, frame.base_asset, frame.quote_asset
@@ -217,7 +271,7 @@ def _metadata(frame: object) -> FrameMetadata:
 
 
 def assess_market_frame(frame: object = None, *, pe: Decimal | None = None) -> FrameDiagnostics:
-    """Read a passive v0 attribute snapshot and return diagnostic-only evidence.
+    """Read a v0 attribute snapshot or validated typed v1 diagnostic snapshot.
 
     Both histories are fully validated before any assessment is invoked. Pe is
     the caller's provisional maximum permitted BUY price, never inferred. Invalid
@@ -231,7 +285,9 @@ def assess_market_frame(frame: object = None, *, pe: Decimal | None = None) -> F
         trend = assess_hourly_trend(metadata.h1.candles, as_of=metadata.as_of)
         pullback = assess_pullback(metadata.m15.candles, as_of=metadata.as_of)
         eligible = trend.eligible and pullback.eligible
-        reasons = [DiagnosticReason.FRAME_VALIDATED, *_EXECUTION_BLOCKERS]
+        blockers = (_EXECUTION_BLOCKERS if metadata.schema_version == SUPPORTED_SCHEMA else
+                    (DiagnosticReason.DIAGNOSTIC_ONLY, DiagnosticReason.SHARED_SCHEMA_UNAPPROVED))
+        reasons = [DiagnosticReason.FRAME_VALIDATED, *blockers]
         reasons.append(DiagnosticReason.TECHNICAL_CONDITIONS_MET if eligible
                        else DiagnosticReason.TECHNICAL_CONDITIONS_NOT_MET)
         stop = None
