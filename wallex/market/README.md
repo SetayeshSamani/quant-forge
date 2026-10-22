@@ -454,3 +454,42 @@ imported.
 
 None of those policies is inferred here; no finalized shared contract or
 permission to trade is established by successful normalization.
+
+
+## Opt-in public historical research
+
+`python -B -m wallex.market.history --fetch --symbol BTCUSDT --base BTC --quote USDT --start 2026-10-01T00:00Z --end 2026-10-15T00:00Z --volume-unit base --output "$env:TEMP\qf-history"`
+
+Run only after independently confirming UDF timestamps are UTC candle-open seconds
+and `v` is base-asset volume: `--volume-unit base` is a caller attestation, not
+provider verification. No live response was fetched during implementation. The
+accepted wire shape is `s=ok` with equal-length `t/o/h/l/c/v` arrays. Other shapes,
+no-data, truncation or different actual spacing fail closed; no protocol fallback
+or unit conversion is guessed. Dates are explicit whole UTC hours, start inclusive
+and end exclusive, at most 14 days, entirely closed at collection time.
+
+Only public GET `/v1/udf/history` with `symbol/resolution=1/from/to` is used. Actual
+60-second spacing and exact range coverage are checked; `resolution=15` is never
+trusted or requested. Complete M1 groups produce M15 and H1 using first open,
+maximum high, minimum low, final close and exact volume sums. Existing normalizers
+and JSONL loaders validate every result. Default chunks are four hours, at most
+96 requests (hard cap 128), 10-second timeouts, 1 MiB responses, no retry/redirect,
+no ambient proxy and no credentials. M1 support is confined to ingestion; the
+existing Strategy timeframe/closed-candle guards are unchanged.
+
+Output must be a **new directory outside this repository**. Exact raw bodies,
+request URLs, receipt UTC seconds and SHA-256 hashes are retained with normalized
+JSONL hashes in `manifest.json`; failed collections remain INCOMPLETE. No files
+are overwritten. Hashes establish integrity, not provider authenticity or account
+eligibility. Downloaded data must never be committed.
+
+`python -B -m wallex.market.history --research --input "$env:TEMP\qf-history"`
+
+This offline command verifies raw/data hashes and source identity, then reuses
+ReplayPlan, TP-1 Shadow and candidate reporting. Default research starts after
+250 complete H1 bars; shorter collections reject research. Optional whole-hour
+`--decision-start/--decision-end` restrict the window. Optional `--pe` is an explicit
+provisional maximum BUY price; absent Pe leaves stop validity unknown. Candidate
+counts and technical rejection reasons are reported with permanent NO_TRADE,
+no executable quantities, approval, exits or profitability claims. Public wire,
+timestamp/volume semantics and actual historical results await owner validation.

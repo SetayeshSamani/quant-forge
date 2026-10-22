@@ -8,6 +8,7 @@ import re
 
 
 class Timeframe(Enum):
+    M1 = 60
     M15 = 900
     H1 = 3600
 
@@ -122,7 +123,7 @@ def normalize_candles(
         )
     if not isinstance(timeframe, Timeframe):
         raise MarketDataError(
-            ErrorCode.INVALID_CONFIG, "expected Timeframe.M15 or Timeframe.H1",
+            ErrorCode.INVALID_CONFIG, "expected a supported Timeframe",
             field="timeframe",
         )
     if not isinstance(timestamp_unit, TimestampUnit):
