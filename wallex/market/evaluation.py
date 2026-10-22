@@ -30,12 +30,19 @@ class ReplayDecision:
     action: Action
     reason: str
     quantity_base: Decimal | None = None
+    diagnostics_json: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.action, Action):
             raise ValueError("explicit Action enum required")
         if not isinstance(self.reason, str) or not self.reason.strip() or len(self.reason) > 1000:
             raise ValueError("a nonblank bounded reason is required")
+        if self.diagnostics_json is not None:
+            if (type(self.diagnostics_json) is not str or not self.diagnostics_json
+                    or len(self.diagnostics_json) > 16384):
+                raise ValueError("diagnostics must be a bounded nonempty JSON string")
+            if type(json.loads(self.diagnostics_json)) is not dict:
+                raise ValueError("diagnostics must encode an object")
         if self.action is Action.NO_TRADE:
             if self.quantity_base is not None:
                 raise ValueError("NO_TRADE cannot carry an order quantity")
@@ -72,7 +79,8 @@ def evaluate_step(step: ReplayStep, provider: DecisionProvider) -> EvaluationRec
     try:
         if not isinstance(decision, ReplayDecision):
             raise ValueError("provider must return ReplayDecision")
-        decision = ReplayDecision(decision.action, decision.reason, decision.quantity_base)
+        decision = ReplayDecision(decision.action, decision.reason, decision.quantity_base,
+                                  decision.diagnostics_json)
     except Exception as exc:
         return EvaluationRecord(step.as_of, None, "INVALID_DECISION",
                                 f"{type(exc).__name__}: {exc}", quality, reasons)
