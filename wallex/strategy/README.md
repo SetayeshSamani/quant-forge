@@ -1,7 +1,7 @@
 # TP-1 strategy and technical indicators
 
-Purpose: deterministic EMA, Wilder ATR, H1 trend eligibility, and M15
-pullback eligibility for the TP-1 Cost-Aware Trend Pullback strategy. The foundation engine remains a
+Purpose: deterministic indicators, H1 trend and M15 pullback eligibility,
+and proposed initial stops for the TP-1 Cost-Aware Trend Pullback strategy. The foundation engine remains a
 scaffold: every call to
 `engine.evaluate()` returns `NO_TRADE`, including when placeholder inputs are
 valid. Indicators do not generate confirmed signals or authorize entries.
@@ -199,6 +199,72 @@ agent decisions, or live execution. H1 eligibility plus M15 eligibility still
 does not authorize trading without the remaining strategy, risk, and execution
 checks. `engine.evaluate()`, `trend.py`, and `indicators.py` are unchanged.
 
+## Proposed initial stop levels
+
+Import `assess_initial_stop` from `wallex.strategy.stops`. The provisional local
+interface is `assess_initial_stop(candles=None, *, entry_price, as_of) ->
+StopAssessment`. It calculates proposed initial levels for **long spot candidates
+only**. Both keyword arguments are mandatory. `entry_price` must be a positive,
+finite `Decimal`; floats, strings, integers, booleans, missing values, and
+nonfinite prices are rejected without coercion. There is **no fallback to the
+latest candle close**, and a caller-supplied price is not proof of a fillable entry.
+
+For the latest completed M15 candle t:
+
+```text
+lowest_low = min(Low[t], Low[t-1], Low[t-2])
+structural_stop = lowest_low - 0.1 * ATR14_M15[t]
+volatility_stop = entry_price - 1.5 * ATR14_M15[t]
+initial_stop = min(structural_stop, volatility_stop)
+risk_per_unit = entry_price - initial_stop
+```
+
+The three-candle lookback includes the decision candle; earlier lows are
+excluded even when lower. The **lower** stop is selected, including when both
+candidates are equal. A structural candidate above entry does not invalidate a
+lower valid volatility candidate; the postconditions apply to the selected stop.
+
+At least **14 completed, contiguous M15 candles** are required for the existing
+Wilder ATR14. Its initialization and first-bar TR convention are unchanged.
+ATR is selected by the latest candle's **close timestamp**, not an assumed output
+index. The input timestamps remain UTC Unix-second **open** times; `as_of` is an
+explicit integer UTC Unix-second cutoff, and `decision_closed_at` is the latest
+candle close, even when the cutoff is later. Incomplete/future bars, inconsistent
+OHLC, duplicate/unsorted/unaligned timestamps, and gaps reject the whole input.
+No sorting, forward filling, invented prices, data fetching, or wall clock is used.
+Old but valid history does not become fresh by passing this calculation.
+
+ATR and stop arithmetic use the same fixed Decimal settings: 34 significant
+digits, ROUND_HALF_EVEN, fixed exponent bounds -999999 through 999999, and
+explicit arithmetic traps independent of caller settings. No float conversion
+or exchange tick-size rounding occurs. Validate the rounded calculation:
+`ATR > 0`, `0 < initial_stop < entry_price`, and `risk_per_unit > 0` must all hold.
+Precision collapse to entry/zero risk, nonpositive stops, invalid entry/ATR,
+insufficient history, alignment errors, and arithmetic failures all fail closed.
+
+`StopAssessment` is frozen and contains `valid`, an immutable tuple of
+`StopReason` codes, `decision_closed_at`, `entry_price`, `lowest_low_last3`,
+`atr14`, `structural_stop`, `volatility_stop`, `initial_stop`, and `risk_per_unit`.
+Every failure has `valid=False` with explicit reasons and **all evidence fields
+None**. Invalid or partial levels are never returned for downstream use.
+A successful result reports `LEVELS_VALID`; that means only these calculations
+and postconditions succeeded.
+
+This is not position sizing: risk per unit is an absolute price difference,
+not a quantity, portfolio risk allocation, loss cap, or risk approval. Fees,
+slippage, liquidity, price/quantity increments, minimum notionals, stop-order
+support, and exchange constraints are not checked. Market-rule/tick rounding
+needs an explicit approved policy and revalidation; these unrounded levels must
+not be submitted directly as exchange orders.
+
+MarketFrame/CandidateSignal integration, instrument and quote-unit identity,
+entry-price provenance, freshness policy, and synchronized decision cutoffs
+remain pending. H1 trend and M15 pullback eligibility are separate requirements;
+this helper neither combines them nor authorizes a trade. It creates no
+TradeIntent, order, agent decision, risk approval, or live execution. Existing
+engine, indicator, trend, pullback, risk, infra, audit, and execution code is
+unchanged.
+
 ## Limitations and planned integration
 
 The shared **MarketFrame contract is pending**. Market owners must confirm
@@ -211,8 +277,8 @@ exchange outages require an explicit future team policy.
 The first-bar convention makes ATR dependent on the chosen history start;
 historical resumption/state persistence is not implemented. Indicator minima
 do not enforce the full 250-hour warm-up automatically. Final TP-1 signal
-composition, entry confirmation, cost checks, stop-loss calculations, and
-position sizing remain deferred. No risk, execution, audit, or shared contract
+composition, entry confirmation, cost checks, and position sizing remain
+deferred. Initial stop levels remain proposals pending those integrations. No risk, execution, audit, or shared contract
 integration is wired by this task.
 
 There are no market-data fetches, credentials, external API calls, background
