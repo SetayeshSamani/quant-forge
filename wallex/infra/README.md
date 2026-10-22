@@ -138,3 +138,32 @@ only transient request headers can carry a resolver result after explicit opt-in
 python -B -m unittest wallex.infra.test_credit_readonly -q
 python -B -m unittest discover -s wallex -p "test_*.py" -q
 ```
+
+## Manual local credit preflight
+
+Run only yourself in an interactive terminal, from the repository root. Replace
+all identity/status placeholders with independently verified dashboard/provider
+values; IDs and the active-status label are never discovered by guessing. OWNER_ID,
+PACKAGE_ID and USER_PACKAGE_ID must be positive integers. Use the actual quote
+currency (TMN or USDT). Do not put the API key in arguments, environment or files.
+
+```powershell
+python -B -m wallex.infra.credit_preflight --connect `
+  --sub-account-client-id CREDIT_CLIENT_ID --owner-user-id OWNER_ID `
+  --package-id PACKAGE_ID --user-package-id USER_PACKAGE_ID `
+  --currency TMN --plan-type PLAN_TYPE --expected-plan-status PLAN_STATUS
+```
+
+`--connect` explicitly opts in and attests the selected credit account's read
+access. The key is obtained only by hidden `getpass`; absent interactive input or
+an echo fallback aborts. Existing bounded GET-only transport, TLS and no-redirect
+policy are reused. Three scoped responses must match the explicit account/owner,
+package IDs, plan type, currency and status label; suspended accounts, mismatches
+and observations older than 30 seconds fail. Missing identifiers require manual
+confirmation before running. No raw responses, IDs, balances or status strings
+are printed, persisted or logged: stdout is a fixed-category JSON summary.
+Exit 0 means only successful reads and these local checks, never financial health
+or proven credential scope. Balance arithmetic, expiry, fees and credit-risk
+semantics remain unassessed here; the existing offline adapter requires separately
+agreed evidence/semantics. `NO_TRADE` and `executable_ready=False` are permanent.
+This command is not run against Wallex during development; tests use mocks only.
