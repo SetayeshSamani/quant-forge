@@ -118,7 +118,9 @@ class ReplayGateway:
                 observation = self.transport.submit(intent)
             except Exception:
                 return GatewayResult("submission_unknown", self._uncertain(record, "submission_outcome_unknown"))
-            return GatewayResult("submission_observed", self._accept(record, observation))
+            receipt = self._accept(record, observation)
+            return GatewayResult("submission_unknown" if receipt.state == OrderState.UNKNOWN
+                                 else "submission_observed", receipt)
 
     def _reconcile_locked(self, record) -> ExecutionReceipt:
         intent = record.request.intent

@@ -10,7 +10,7 @@ import sqlite3
 
 from wallex.execution.models import (
     ContractError, ExecutionReceipt, ExecutionRequest, Fill, Mode, OrderObservation, OrderState, Side,
-    canonical_json, decimal_text,
+    amount, canonical_json, decimal_text,
     exact_sum, identifier, json_value, utc,
 )
 from wallex.risk import RiskReason
@@ -138,13 +138,25 @@ class Ledger:
 
     @staticmethod
     def _record(row) -> IntentRecord:
-        return IntentRecord(
-            ExecutionRequest.from_dict(json.loads(row["request_json"])), OrderState(row["state"]),
-            row["version"], bool(row["reservation_held"]), row["source_order_id"],
-            Decimal(row["reported_filled_quantity"]) if row["reported_filled_quantity"] is not None else None,
-            row["uncertainty_reason"],
-            datetime.fromisoformat(row["last_observed_at"]) if row["last_observed_at"] else None,
-        )
+        try:
+            request = ExecutionRequest.from_dict(json.loads(row["request_json"]))
+            intent = request.intent
+            columns = (row["intent_id"], row["account_id"], row["client_id"], row["symbol"], row["mode"],
+                       row["reservation_asset"], row["reservation_amount"])
+            expected = (intent.intent_id, intent.account_id, intent.client_id, intent.symbol, intent.mode.value,
+                        request.reservation.asset, decimal_text(request.reservation.amount))
+            if request.fingerprint != row["fingerprint"] or columns != expected or row["version"] < 0:
+                raise ValueError("Inconsistent stored binding")
+            filled = Decimal(row["reported_filled_quantity"]) if row["reported_filled_quantity"] is not None else None
+            if filled is not None:
+                amount(filled, zero=True)
+                if filled > intent.quantity_base:
+                    raise ValueError("Inconsistent stored fill total")
+            return IntentRecord(request, OrderState(row["state"]), row["version"], bool(row["reservation_held"]),
+                                row["source_order_id"], filled, row["uncertainty_reason"],
+                                utc(datetime.fromisoformat(row["last_observed_at"])) if row["last_observed_at"] else None)
+        except (ValueError, TypeError, KeyError):
+            raise StorageError("Stored request identity/fingerprint or state is inconsistent; stop and investigate.") from None
 
     def get(self, intent_id: str) -> IntentRecord | None:
         with self._transaction() as db:
@@ -193,6 +205,8 @@ class Ledger:
                            reason: str) -> IntentRecord:
         """Only a never-submitted PLANNED record can release its reservation here."""
         identifier(reason)
+        if type(expected_version) is not int:
+            raise StateConflict("An exact integer version is required.")
         with self._transaction() as db:
             row = db.execute("SELECT * FROM intents WHERE intent_id=?", (identifier(intent_id),)).fetchone()
             if row is None or row["state"] != OrderState.PLANNED.value or row["version"] != expected_version:
@@ -303,6 +317,8 @@ class Ledger:
 
     def observe(self, intent_id: str, observation: OrderObservation, *, expected_version: int,
                 at: datetime) -> IntentRecord:
+        if type(expected_version) is not int:
+            raise StateConflict("An exact integer version is required.")
         if not isinstance(observation, OrderObservation):
             raise ObservationError("Expected a typed synthetic order observation.")
         observation = OrderObservation.from_dict(json_value(observation))
