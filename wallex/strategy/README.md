@@ -1,7 +1,7 @@
 # TP-1 strategy and technical indicators
 
-Purpose: deterministic EMA, Wilder ATR, and H1 trend eligibility for the
-TP-1 Cost-Aware Trend Pullback strategy. The foundation engine remains a
+Purpose: deterministic EMA, Wilder ATR, H1 trend eligibility, and M15
+pullback eligibility for the TP-1 Cost-Aware Trend Pullback strategy. The foundation engine remains a
 scaffold: every call to
 `engine.evaluate()` returns `NO_TRADE`, including when placeholder inputs are
 valid. Indicators do not generate confirmed signals or authorize entries.
@@ -133,6 +133,72 @@ position sizing, and exchange execution are outside this filter. The existing
 `engine.evaluate()` still always returns `NO_TRADE`; its contracts and behavior
 are unchanged. No risk, infra, or teammate-owned module is modified.
 
+## M15 pullback detector
+
+Import `assess_pullback` from `wallex.strategy.pullback`. Its provisional local
+interface is `assess_pullback(candles=None, *, as_of) -> PullbackAssessment`.
+The latest completed M15 bar is t. All three conditions must hold together:
+
+```text
+Close[t-1] <= EMA20[t-1]
+Close[t] > EMA20[t]
+0 < Close[t] - EMA20[t] <= ATR14[t]
+```
+
+The previous-close equality is **allowed**. Current-close equality is
+**rejected**. A positive distance **exactly equal to current ATR14 is allowed**;
+a greater distance rejects eligibility. Flat prices with zero ATR do not
+qualify. Invalid/nonfinite or negative indicator outputs fail closed.
+
+At least **21 completed, contiguous M15 candles** are required: SMA-seeded EMA20
+needs 20 closes for its seed and one more for both current and previous values.
+The existing Wilder ATR14 supplies the current ATR using its documented
+first-bar and initialization conventions. Indicators are matched by candle
+**close timestamp**, so their different warm-up lengths cannot shift the
+comparison to the wrong bar. The module does not implement alternative EMA/ATR
+calculations and does not modify the existing indicators.
+
+Both the indicators and the detector's price-minus-EMA subtraction use an
+explicit Decimal context: 34 significant digits, ROUND_HALF_EVEN, exponent
+bounds -999999 through 999999, and explicit arithmetic traps. Caller precision,
+rounding, and traps are isolated. Prices never pass through float conversion.
+The distance is the subtraction of the calculated EMA under this same fixed
+precision; values are not quantized to instrument tick sizes.
+
+`PullbackAssessment` is frozen. It contains `eligible`, an immutable tuple of
+`PullbackReason` values, `decision_closed_at`, `previous_closed_at`,
+`current_close`, `previous_close`, `current_ema20`, `previous_ema20`,
+`current_atr14`, and `distance_from_ema20`. Timestamps are UTC Unix **seconds at
+candle close**. The decision timestamp is the latest candle's close, not a later
+`as_of` cutoff. The input Candle timestamp remains the candle **open** time.
+
+Valid but nonqualifying inputs retain actual evidence and explicit reasons for
+the failed crossover, nonpositive ATR/distance, or excessive distance. Invalid
+input, insufficient history, arithmetic failures, or missing indicator-time
+alignment produce `eligible=False`, an explicit failure reason, and no price or
+indicator evidence. No zeros or fabricated timestamps stand in for missing data.
+
+The explicit `as_of` cutoff and existing M15 validation reject incomplete or
+future bars, invalid OHLC, unaligned/duplicate/unsorted timestamps, and missing
+intervals. A bar closing exactly at `as_of` is usable; one closing later is not.
+The entire batch is rejected rather than silently dropping future rows. No
+candles are invented, forward-filled, or fetched, and no wall clock is read.
+The caller must supply the appropriate completed prefix and enforce any future
+team-approved freshness policy.
+
+This result establishes **M15 pullback eligibility only**. The complete strategy
+also needs an eligible H1 assessment from `trend.py` at the appropriate decision
+cutoff, with its separate 250-H1 warm-up requirement. Combining these results
+into an approved signal is not implemented here. **MarketFrame and
+CandidateSignal contracts remain pending**; these local records do not define
+or change a team-wide contract. Adapters must agree instrument identity,
+timestamp semantics, timeframe metadata, freshness, and cross-timeframe alignment.
+
+The detector creates no TradeIntent, orders, risk sizing, stop-loss levels, AI
+agent decisions, or live execution. H1 eligibility plus M15 eligibility still
+does not authorize trading without the remaining strategy, risk, and execution
+checks. `engine.evaluate()`, `trend.py`, and `indicators.py` are unchanged.
+
 ## Limitations and planned integration
 
 The shared **MarketFrame contract is pending**. Market owners must confirm
@@ -144,9 +210,10 @@ exchange outages require an explicit future team policy.
 
 The first-bar convention makes ATR dependent on the chosen history start;
 historical resumption/state persistence is not implemented. Indicator minima
-do not enforce the full 250-hour warm-up automatically. Final TP-1 entry,
-pullback, confirmation, and signal calculations remain deferred. No risk,
-execution, audit, or shared contract integration is wired by this task.
+do not enforce the full 250-hour warm-up automatically. Final TP-1 signal
+composition, entry confirmation, cost checks, stop-loss calculations, and
+position sizing remain deferred. No risk, execution, audit, or shared contract
+integration is wired by this task.
 
 There are no market-data fetches, credentials, external API calls, background
 workers, order submission, or live trading. Missing input never becomes a
