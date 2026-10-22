@@ -5,8 +5,9 @@ OHLCV input format into immutable `MarketCandle` records. This is not a Wallex
 API payload definition, exchange adapter, finalized shared `MarketFrame`, or
 trading-readiness check. Python 3.11 standard library only; no dependencies.
 
-The module does no I/O, network access, credential loading, scheduling, order
-submission, or strategy/risk work. Production code does not import strategy.
+The normalizer does no I/O. The dataset loader reads only an explicitly supplied
+local file. Neither performs network access, credential loading, scheduling,
+order submission, or strategy/risk work. Production code does not import strategy.
 
 ## Interface and raw format
 
@@ -154,12 +155,126 @@ assert str(points[0].value) == "100"
 This is an explicit integration example, not automatic strategy wiring. Market
 normalization does not enforce EMA/ATR history minima or TP-1's 250 H1 bars.
 
+## Local JSONL datasets
+
+`load_dataset(path, *, symbol, timeframe, timestamp_unit, as_of)` reads a local
+dataset for reproducible testing and future replay. All keyword arguments are
+mandatory and have the same meaning as for `normalize_candles`. No strategy is
+run, and no backtest or execution mode is started.
+
+```python
+from pathlib import Path
+from wallex.market import Timeframe, TimestampUnit, load_dataset
+
+dataset = load_dataset(
+    Path("wallex/market/fixtures/synthetic_m15.jsonl"),
+    symbol="SYNTHETIC-BASE-QUOTE",
+    timeframe=Timeframe.M15,
+    timestamp_unit=TimestampUnit.SECONDS,
+    as_of=2700,
+)
+assert dataset.candle_count == 3
+assert (dataset.first_open_at, dataset.last_open_at) == (0, 1800)
+assert str(dataset.candles[1].volume) == "1.25"
+assert len(dataset.sha256) == 64
+```
+
+The bundled `fixtures/synthetic_m15.jsonl` is **entirely synthetic**, with a
+caller-supplied synthetic instrument label. Its observations are not real market
+data and do not demonstrate strategy performance.
+
+### File format
+
+- Strict UTF-8 without a BOM. No encoding autodetection or replacement characters.
+- One JSON object per physical LF-delimited line; CRLF is accepted too.
+  A single terminal newline is optional, not an empty record. Blank/whitespace
+  lines, including an additional terminal blank line, are errors.
+- Each object has exactly the raw-format fields documented above. JSON comments,
+  multiple objects on one line, and top-level arrays/scalars are rejected.
+- `timestamp` is a JSON integer and `completed` is a real JSON boolean.
+  Prices/volume may be decimal strings or JSON integers. Fractional/exponent
+  **JSON number tokens** such as `100.0` or `1e2` are forbidden; use `"100.0"` or
+  `"1e2"` strings instead. JSON NaN/Infinity tokens and duplicate keys (including
+  escaped equivalents) are explicitly rejected.
+- A zero-byte file is valid empty history, subject to valid configuration.
+- One configured symbol/timeframe per file; source identity must be verified
+  upstream. The loader does not infer metadata from filenames or invent a
+  cross-instrument file format.
+
+The file is read once into bytes. Those same bytes supply both UTF-8/JSON parsing
+and SHA-256. After parsing, the **whole** collection is passed to the existing
+normalizer once, so gaps, duplicates, ordering, closed-candle and cutoff checks
+apply across records. Its rules are unchanged. Rows are not repaired or skipped.
+
+### Result and reproducibility
+
+`LoadedDataset` is an immutable internal result container, not a finalized
+`MarketFrame`. Construct validated results via `load_dataset`. It exposes:
+
+| Attribute | Meaning |
+| --- | --- |
+| `candles` | Tuple of normalized immutable `MarketCandle` records. |
+| `sha256` | Lowercase hexadecimal SHA-256 of the exact file bytes read. |
+| `candle_count` | Number of normalized candles. |
+| `first_open_at`, `last_open_at` | First/last candle open in UTC Unix seconds; `None` for empty history. |
+| `symbol`, `timeframe`, `timestamp_unit`, `as_of` | Explicit settings used for this load. |
+
+Count and range are derived from the candles to avoid inconsistent metadata.
+`timestamp_unit` records the **input** setting; candle timestamps and range
+metadata are always seconds. The result does not depend on the filename, path,
+local clock or modification time. The source file is not modified.
+
+SHA-256 identifies **bytes**, not semantic candle equality. Whitespace, LF/CRLF,
+or a terminal newline can change the hash while yielding equal candles. File
+hash alone is not an experiment identity: record load settings and, for future
+backtests, strategy version and all relevant simulation parameters as well.
+
+### Dataset errors and limits
+
+`DatasetError` exposes `code`, `line_number`, `index`, and `field`. Physical line
+numbers are **one-based**. A wrapped `MarketDataError` retains its original
+`ErrorCode`, zero-based `index`, and `field`, with `line_number = index + 1`.
+Its original exception is available as `__cause__`. Configuration errors retain
+`index=None` and `line_number=None`; no record location is invented.
+
+Loader-specific `DatasetErrorCode` values are `READ_ERROR`, `INVALID_ENCODING`,
+`BLANK_LINE`, `INVALID_JSON`, `DUPLICATE_KEY`, `INVALID_JSON_NUMBER`, and
+`NON_OBJECT_RECORD`. Read, decode, JSON parser and normalization failures preserve
+their original exceptions through chaining when one exists. Explicit format
+checks such as a BOM/blank line do not have an underlying exception. Loader-only
+failures leave `index` and `field` as `None`.
+
+```python
+from wallex.market import DatasetError, ErrorCode
+
+# Catch DatasetError around load_dataset(...).
+# For example, a negative volume on physical line 2 has:
+# error.code is ErrorCode.NEGATIVE_VOLUME
+# error.line_number == 2, error.index == 1, error.field == "volume"
+# isinstance(error.__cause__, MarketDataError)
+```
+
+Failure precedence follows phases: read file, decode the complete UTF-8
+snapshot, parse lines in order, then normalize in record order (including
+configuration validation). The first failing phase stops the load; no partial
+dataset is returned. For example, a later JSON syntax failure is reported before
+an earlier row's OHLC error, because normalization starts only after parsing.
+
+The loader holds the complete byte snapshot, decoded text, and records in
+memory. Streaming, file-size limits, concurrent-writer coordination and dataset
+storage/versioning are not implemented. JSON parsing is subject to Python's
+parser limits; limit failures are reported as `INVALID_JSON`. An upstream owner
+must ensure a stable source file when a snapshot of a specific historical
+version is required. Hashing records what was read, not authenticity or source
+instrument identity.
+
 ## Tests
 
 From the repository root, without writing bytecode:
 
 ```text
 python -B -m unittest wallex.market.test_normalization -v
+python -B -m unittest wallex.market.test_datasets -v
 python -B -m unittest discover -s wallex -p "test_*.py" -v
 ```
 
@@ -168,6 +283,12 @@ timeframes, cutoff boundaries, open/future rejection, malformed/missing data,
 duplicates/order/gaps, immutability and repeatability. A consumer compatibility
 test checks actual EMA20, EMA50 and ATR14 outputs and their availability times
 on normalized M15 and H1 data, without changing strategy files.
+
+Dataset tests use temporary local files and fixed synthetic byte fixtures. They
+cover exact hashes and a single read snapshot, metadata/settings, line endings,
+repeatability/immutability, strict JSON/encoding errors, portable read failures,
+whole-file continuity and cutoff checks, error provenance, and the bundled
+synthetic fixture.
 
 ## Team decisions still required
 
