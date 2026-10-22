@@ -392,3 +392,105 @@ verbose passing logs:
 python -B -m unittest wallex.risk.test_portfolio_guards -q
 python -B -m unittest discover -s wallex -p "test_*.py" -q
 ```
+
+## Integrated Strategy/Risk diagnostic pipeline
+
+`pipeline.py` exposes frozen `PipelineInputs` and `PipelineAssessment` records
+and pure `assess_risk_pipeline(inputs=None)`. It composes the existing Strategy
+frame adapter, initial-stop diagnostics, position sizer, loss guards and portfolio
+guards without changing them. It performs no I/O, clock reads, persistence,
+configuration lookup, account retrieval, order admission or execution. Existing
+`gate.evaluate_entry` is not called: its quantity/notional checks are partial
+validation and cannot establish full risk authorization or instrument compliance.
+
+Supply every input explicitly:
+
+| Input | Units and meaning |
+| --- | --- |
+| `frame` | Passive provisional MarketFrame v0 evidence accepted by Strategy's existing attribute interface; no mandatory Market import. |
+| `pe` | Decimal quote/base maximum permitted BUY price Pe, never inferred from a candle close or claimed to be a fill price. |
+| `worst_case_extra_loss_per_unit` | Decimal additional worst-case quote loss per base unit; missing evidence is rejected, including when zero would be convenient. Explicit zero is only a caller claim. |
+| `equity`, `free_quote` | Decimal account values in the explicitly named quote asset, with no automatic currency conversion or balance defaults. |
+| `quote_asset`, `account_id` | Explicit quote label and account identity; neither is inferred from another component. |
+| `profile` | Actual `RiskProfile.L0` or `RiskProfile.R0`, explicitly selected; no default or automatic activation. |
+| `loss_state`, `portfolio_state` | The existing immutable evidence records, including their own cutoff, completeness and policy fields. |
+
+The frame must be a stable passive snapshot throughout the call. Freezing
+`PipelineInputs` does not deep-freeze a foreign frame object. The adapter projects
+validated candles into immutable diagnostics; `PipelineAssessment` retains those
+results, not the mutable foreign frame. No shared schema is introduced here.
+
+### Stage results, coherence and sizing
+
+Frame/Trend/Pullback/optional explicit-Pe stop, loss guards and portfolio guards
+are assessed independently. Their actual returned assessments and reason codes
+are retained even if another component rejects its evidence. A component that
+raises or returns the wrong result type is recorded in `failed_stages`, with
+`COMPONENT_FAILURE`; its result remains `None`, without invented evidence or
+arbitrary exception text. Later independent components still run. Invalid input
+containers skip every stage with `INVALID_INPUT`.
+
+Before sizing, the pipeline requires valid component evidence and compares:
+
+- Frame metadata, loss state and portfolio state must share the same explicit
+  `as_of`, in UTC Unix seconds. Candle timestamps retain Strategy's opening-time
+  meaning; only completed, continuous M15/H1 histories available at that cutoff
+  are accepted. The latest candle close can precede an off-grid cutoff.
+- The explicit quote asset must match all three components exactly. No alias
+  normalization, asset substitution or implicit conversion is performed.
+- The explicit account must match the Portfolio state account.
+- The selected L0/R0 profile must match the validated Loss policy. The unchanged
+  sizer's `policy_for` supplies that profile's risk and position fractions.
+- Explicit sizing equity must equal Loss state `current_equity`.
+
+`coherence_valid` means these local input correlations passed, independently of
+technical eligibility or breached guards. `local_conditions_satisfied` additionally
+requires Trend AND Pullback eligibility, a valid explicit-Pe proposed stop,
+nonblocking local loss/portfolio guards and a valid sizing calculation. Missing,
+invalid or mismatched evidence blocks this local success. When prerequisites
+fail, sizing is not called: `sizing=None` and `skipped_stages` identifies its
+blocking reasons. If sizing itself rejects inputs, its actual failed assessment
+is retained and contains no usable quantity. An attempted failed component is
+distinguished from a skipped stage.
+
+Only that complete local path produces the existing sizer's theoretical base-unit
+quantity upper bound, nested in `assessment.sizing`; it is **not approved or
+exchange-rounded**. Stop calculation is reused through Strategy's frame adapter,
+not recomputed from candle close. Existing conservative Decimal calculations,
+extra-loss budget treatment and fixed component precision remain unchanged.
+
+### Permanent authorization and provenance limitations
+
+Every result fixes `executable_ready=False` and `executable_action=NO_TRADE`, even
+when local checks and sizing pass. `limitations` always records diagnostic-only
+status, unapproved Market evidence, provisional Pe/cost provenance, unresolved
+Loss/account provenance and unavailable atomic admission. No approved
+CandidateSignal, RiskDecision, Agent decision, TradeIntent, order, execution
+request or admission token is produced. No Gate or risk profile is activated.
+
+MarketFrame v0 remains INCOMPLETE: Quote/Depth, event/receive time semantics,
+canonical snapshot hash and approved shared schema are unresolved. Its dataset
+hashes and source labels are claims, not verified provenance. Pe and cost source,
+freshness, instrument rules, tick/lot rounding and upfront fee funding remain
+unverified. A successful calculation does not repair those evidence gaps.
+
+**LossGuardState has no independent `account_id`.** Matching quote, equity and
+cutoff does not prove that its valuations, high-water history or breach flags
+belong to the explicit Portfolio account. Nor does this interface prove that
+supplied free funds come from that account or the same observation. Authentic
+account correlation, valuation/freshness policy, persistent breach history and
+restart recovery need agreed upstream contracts; no extra identity field or
+shared contract is invented here.
+
+Repeated assessments of one flat snapshot can both pass. Neither consumes
+capacity nor reserves funds, so neither guarantees atomic admission. Authoritative
+revalidation, stable intent identity, durable reservation and single-writer
+coordination remain Audit/Execution ownership. This pipeline adds no parallel
+ledger, lock or admission protocol and leaves their PRs #4/#5 unchanged.
+
+Run the focused tests before the complete regression suite:
+
+```text
+python -B -m unittest wallex.risk.test_pipeline -q
+python -B -m unittest discover -s wallex -p "test_*.py" -q
+```
