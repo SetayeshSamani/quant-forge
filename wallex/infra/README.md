@@ -48,3 +48,43 @@ From the repository root, test without bytecode files:
 ```text
 python -B -m unittest discover -s wallex -p test_runtime.py -v
 ```
+
+## Offline Trade Credit evidence
+
+`credit_account.assess_credit_account(CreditEvidenceInputs(...))` consumes only
+stable sanitized payloads for account list, active package and detailed balances.
+It accepts no key, authentication headers, HTTP client, clock or execution hook.
+The bundled JSON fixture is entirely synthetic, including its active-status
+label, amounts, identity and timestamps; it is not a captured private response.
+
+Supply an explicit Trade Credit binding, every response's sub-account scope,
+completeness and observed UTC Unix seconds, an `as_of`/maximum age, exact asset
+units and local field interpretations. Missing evidence, wrong owner/account/
+package identity, inactive/suspended state, stale/future observations, expiry,
+ambiguous currency/thresholds or inconsistent balance/fee arithmetic reject the
+snapshot. Expiry equality blocks; age-limit equality is allowed. No rounding,
+float conversion, implicit FX or wall-clock freshness is used. UTC plan dates
+must have whole-second precision. No actual provider active-status enum is
+invented: the active label is required caller evidence, and known terminal labels
+cannot be admitted by that configuration.
+
+The current local interpretation supports threshold claims in account-value
+quote units and an explicit `finalPayback`-as-total-due debt claim. These meanings
+and fee currencies are NOT approved Wallex semantics. Unsupported/missing meanings
+fail closed; `loan` is never silently substituted for outstanding debt. Returned
+frozen balances/terms preserve claims; `available_quote` is reported funds only.
+`risk_equity` is permanently None. No Risk/Audit/Execution logic or existing
+models are changed; Execution's placeholder AccountSnapshot cannot represent
+these balances, so no false conversion is provided.
+
+Even a locally valid snapshot has `blocks_new_entries=True`,
+`credential_scope_verified=False`, `executable_ready=False` and `NO_TRADE`.
+Request-scope labels do not prove the existing API key's account/permissions.
+Observations do not establish an atomic portfolio or settled balances. Account
+provenance, approved credit-risk policy, fees/thresholds and atomic admission
+remain pending; see `docs/WALLEX_CREDIT_API_AUDIT.md`. No key was read or requested.
+
+```text
+python -B -m unittest wallex.infra.test_credit_account -q
+python -B -m unittest discover -s wallex -p "test_*.py" -q
+```

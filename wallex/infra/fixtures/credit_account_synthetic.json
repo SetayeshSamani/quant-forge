@@ -1,0 +1,107 @@
+{
+  "fixture_kind": "SANITIZED_SYNTHETIC_API_EVIDENCE",
+  "binding": {
+    "sub_account_client_id": "synthetic-credit-001",
+    "owner_user_id": 42,
+    "package_id": 12,
+    "user_package_id": 34,
+    "currency": "TMN",
+    "kind": "TRADE_CREDIT",
+    "plan_type": "prop-public"
+  },
+  "as_of": 1800000,
+  "max_age_seconds": 30,
+  "semantics": {
+    "active_plan_status": "SYNTHETIC_ACTIVE",
+    "balance_units": [
+      [
+        "TMN",
+        "TMN"
+      ],
+      [
+        "USDT",
+        "USDT"
+      ]
+    ],
+    "fee_currency": "TMN",
+    "debt_currency": "TMN",
+    "threshold_currency": "TMN",
+    "threshold_basis": "ACCOUNT_VALUE_IN_QUOTE",
+    "debt_basis": "FINAL_PAYBACK_AS_TOTAL_DUE"
+  },
+  "accounts": {
+    "sub_account_client_id": "synthetic-credit-001",
+    "observed_at": 1799990,
+    "complete": true,
+    "payload": {
+      "success": true,
+      "result": [
+        {
+          "clientId": "synthetic-credit-001",
+          "userId": 42,
+          "type": "prop",
+          "isActive": true,
+          "isSuspend": false
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "count": 1,
+        "total_count": 1
+      }
+    }
+  },
+  "plan": {
+    "sub_account_client_id": "synthetic-credit-001",
+    "observed_at": 1799995,
+    "complete": true,
+    "payload": {
+      "success": true,
+      "result": {
+        "packageDetail": {
+          "id": 12,
+          "currency": "TMN",
+          "destination_currency": null,
+          "assurance": "1000",
+          "loan": "2000",
+          "dailyFee": "2.5",
+          "dailyFeeDiscount": "0.5",
+          "dailyFeeAfterDiscount": "2.0"
+        },
+        "userPackageDetail": {
+          "id": 34,
+          "type": "prop-public",
+          "status": "SYNTHETIC_ACTIVE",
+          "createdAt": "1970-01-21T00:00:00.000000Z",
+          "expireAt": "1970-01-22T20:00:00.000000Z",
+          "finalPayback": "2002",
+          "finalPayableFeeAmount": "2",
+          "warningLimit": "2100",
+          "liquidityLimit": "2050"
+        }
+      }
+    }
+  },
+  "balances": {
+    "sub_account_client_id": "synthetic-credit-001",
+    "observed_at": 1799998,
+    "complete": true,
+    "payload": {
+      "success": true,
+      "result": {
+        "TMN": {
+          "symbol": "TMN",
+          "total": "3000",
+          "freeze": "250",
+          "available": "2750"
+        },
+        "USDT": {
+          "symbol": "USDT",
+          "total": "1.25",
+          "freeze": "0.25",
+          "available": "1.00"
+        }
+      }
+    }
+  }
+}
