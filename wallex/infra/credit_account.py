@@ -160,6 +160,26 @@ def _integer(value):
     return type(value) is int and value >= 0
 
 
+def user_id_format(value):
+    """Categorize wire identity without returning the identifier itself."""
+    if type(value) is int:
+        return "INTEGER"
+    if value is None:
+        return "NULL"
+    if (type(value) is str and value.isascii() and value.isdecimal()
+            and (value == "0" or not value.startswith("0"))):
+        return "DECIMAL_STRING"
+    return "OTHER"
+
+
+def user_id_matches(value, expected):
+    """Exact nonnegative identity match; no coercion, rounding or zero stripping."""
+    return _integer(expected) and (
+        (_integer(value) and value == expected)
+        or (user_id_format(value) == "DECIMAL_STRING" and value == str(expected))
+    )
+
+
 def _get(record, name):
     _require(isinstance(record, Mapping) and name in record,
              CreditReason.MISSING_EVIDENCE, name)
@@ -251,7 +271,7 @@ def assess_credit_account(inputs: CreditEvidenceInputs | None = None) -> CreditA
                  r.IDENTITY_MISMATCH, "accounts.clientId")
         _require(binding.sub_account_client_id in ids, r.IDENTITY_MISMATCH, "accounts.clientId")
         account = accounts[ids.index(binding.sub_account_client_id)]
-        _require(type(_get(account, "userId")) is int and account['userId'] == binding.owner_user_id
+        _require(user_id_matches(_get(account, "userId"), binding.owner_user_id)
                  and _get(account, "type") == "prop", r.IDENTITY_MISMATCH, "accounts.owner/type")
         _require(_get(account, "isActive") is True and _get(account, "isSuspend") is False,
                  r.INACTIVE_OR_SUSPENDED, "accounts.status")

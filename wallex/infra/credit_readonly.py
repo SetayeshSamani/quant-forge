@@ -17,6 +17,7 @@ import ssl
 from wallex.strategy.engine import Signal
 from .credit_account import (
     AccountKind, CreditAccountBinding, CreditEvidenceInputs, CreditResponse, CreditSemantics,
+    user_id_format, user_id_matches,
 )
 
 ORIGIN = "https://api.wallex.ir"
@@ -224,8 +225,8 @@ def _sanitize(payload, path, binding, config):
         ids = [row["clientId"] for row in rows]
         _require(all(_label(i) for i in ids) and len(set(ids)) == len(ids), ReadReason.AMBIGUOUS_SCOPE)
         matches = [r for r in rows if r["clientId"] == binding.sub_account_client_id]
-        _require(len(matches) == 1 and type(matches[0]["userId"]) is int
-                 and matches[0]["userId"] == binding.owner_user_id and matches[0]["type"] == "prop",
+        _require(len(matches) == 1 and user_id_matches(matches[0]["userId"], binding.owner_user_id)
+                 and matches[0]["type"] == "prop",
                  ReadReason.AMBIGUOUS_SCOPE)
         return {"success": True, "result": rows, "result_info": info}
     if path == GET_PATHS[1]:
@@ -263,8 +264,8 @@ def _scope_checks(payload, binding, config):
     account_type = selected["type"] if selected and selected["type"] in safe_types else "OTHER_OR_UNKNOWN"
     return MappingProxyType({
         "client_id_match": "UNIQUE" if len(matches) == 1 else "MULTIPLE" if matches else "NOT_FOUND",
-        "user_id_match": (selected["userId"] == binding.owner_user_id
-                          if selected and type(selected["userId"]) is int else None),
+        "user_id_format": user_id_format(selected["userId"] if selected else None),
+        "user_id_match": user_id_matches(selected["userId"], binding.owner_user_id) if selected else None,
         "account_type": account_type if selected else "UNAVAILABLE",
         "is_active": selected["isActive"] if selected and type(selected["isActive"]) is bool else None,
         "is_suspended": selected["isSuspend"] if selected and type(selected["isSuspend"]) is bool else None,

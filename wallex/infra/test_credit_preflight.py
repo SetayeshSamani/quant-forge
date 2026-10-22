@@ -130,6 +130,39 @@ class CreditPreflightTests(unittest.TestCase):
                     self.assertEqual(normal_code, 1)
                     self.assertEqual(normal_report["validation_failures"], ["AMBIGUOUS_SCOPE"])
 
+    def test_user_id_formats_match_exactly_without_exposing_identity(self):
+        from .credit_account import CreditEvidenceInputs, CreditResponse, assess_credit_account
+
+        cases = ((42, "INTEGER", True), ("42", "DECIMAL_STRING", True),
+                 (43, "INTEGER", False), ("43", "DECIMAL_STRING", False),
+                 (None, "NULL", False), (True, "OTHER", False), (-42, "INTEGER", False),
+                 ("-42", "OTHER", False), ("042", "OTHER", False), ("+42", "OTHER", False),
+                 (" 42", "OTHER", False), ("42.0", "OTHER", False), ("4.2e1", "OTHER", False),
+                 ("\u0664\u0662", "OTHER", False), (42.0, "OTHER", False), ("", "OTHER", False))
+        for value, expected_format, accepted in cases:
+            binding, semantics, payloads, _ = setup_fixture()
+            payloads[0]["result"][0]["userId"] = value
+            with self.subTest(format=expected_format, accepted=accepted):
+                code, report, err, transport, _, _ = invoke(arguments() + ["--diagnose-scope"], payloads)
+                self.assertEqual(code, 0 if accepted else 1)
+                self.assertEqual(report["scope_checks"]["user_id_format"], expected_format)
+                self.assertIs(report["scope_checks"]["user_id_match"], accepted)
+                self.assertEqual([r.path for r in transport.calls], ["/sub-accounts"])
+                self.assertNotIn("42", json.dumps(report))
+                self.assert_safe(report, err)
+                code, normal, err, _, _, _ = invoke(payloads=payloads)
+                self.assertEqual(code, 0 if accepted else 1)
+                self.assert_safe(normal, err)
+                if not accepted:
+                    self.assertEqual(normal["validation_failures"], ["AMBIGUOUS_SCOPE"])
+                responses = [CreditResponse(payload, binding.sub_account_client_id, observed, True)
+                             for payload, observed in zip(payloads, (1799990, 1799995, 1799998))]
+                assessment = assess_credit_account(CreditEvidenceInputs(
+                    binding, *responses, semantics, 1800000, 30))
+                self.assertIs(assessment.snapshot_valid, accepted)
+                self.assertFalse(assessment.executable_ready)
+                self.assertTrue(assessment.blocks_new_entries)
+
     def test_no_echo_fallback_and_explicit_manual_identity_gate(self):
         def no_hidden_input(*args, **kwargs):
             warnings.warn(FAKE, cli.getpass.GetPassWarning)
