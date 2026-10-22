@@ -1,15 +1,20 @@
-# Offline execution consumer foundation
+# Offline execution ledger and replay reconciliation
 
 Scope: `wallex/execution/` and `wallex/audit/` only. The agreed design direction
 was read in full from `QuantForge_Project_Plan.md` (236 lines), SHA-256
 `56a2c3d370ab2fffe6908139265334eea21d76f4faaea3efe9f56a93017ac7df`.
 Its design direction does not authorize live trading or select account settings.
 
-The verified base is actual main
+The original development base is main
 `de3051be409e2dfb3530e556cd6205f201b15578`. Fetch/prune/tags and main's tracked
-fast-forward pull completed. This clone had no previous local implementation or
+fast-forward pull completed. Before publication, main advanced to
+`dd3b40cf42b5abd58a318551bd05f93bca966205`; the new indicators/trend code was
+also tested with this execution stage in a detached temporary worktree (140
+passing tests). Topic history retains its original base without a rewrite.
+This clone had no previous local implementation or
 unpublished commits; no personal branch names required migration. The existing
-TP-1 indicator PR #2 remains separate and unmodified. No applicable AGENTS.md or
+TP-1 indicator/trend PRs #2/#3 were merged by their owner during development;
+this task did not alter or merge those PRs. No applicable AGENTS.md or
 shared schema module was found. The 25 existing strategy/risk/runtime tests pass.
 
 ## Provisional boundary
@@ -55,5 +60,19 @@ python -B -m unittest discover -s wallex -p 'test_*.py' -v
 ```
 
 The durable ledger is documented in [../audit/README.md](../audit/README.md).
-The next stacked branch adds the injected replay gateway. Live remains unavailable;
-no REST/MCP order submission, credentials or funded account is used.
+The injected replay gateway is documented in [HANDOFF.md](HANDOFF.md), including
+branch ancestry, consumer contracts, transitions, actual verification and the
+remaining producer decisions. Live remains unavailable; no REST/MCP order
+submission, credentials or funded account is used.
+
+Run the temporary synthetic UNKNOWN -> restart -> stable-ID reconciliation example:
+
+```powershell
+python -B -m wallex.execution.example
+```
+
+It submits once, loses the synthetic acceptance response, blocks a new entry
+after restart and finds the original order using the same client ID. The output
+keeps unknown quantities null, reservations held and sellable balance unknown.
+The temporary database is removed when the example finishes. The example never
+opens an existing account database or contacts an exchange.
