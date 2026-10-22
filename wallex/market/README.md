@@ -1,4 +1,4 @@
-# Provisional market-data normalization
+# Provisional market data, datasets, and frame assembly
 
 Roham owns this package. It normalizes an explicitly documented **internal**
 OHLCV input format into immutable `MarketCandle` records. This is not a Wallex
@@ -8,6 +8,8 @@ trading-readiness check. Python 3.11 standard library only; no dependencies.
 The normalizer does no I/O. The dataset loader reads only an explicitly supplied
 local file. Neither performs network access, credential loading, scheduling,
 order submission, or strategy/risk work. Production code does not import strategy.
+Frame assembly is an in-memory operation over two loaded datasets. It produces
+an explicitly incomplete internal proposal, not a shared contract.
 
 ## Interface and raw format
 
@@ -268,6 +270,148 @@ must ensure a stable source file when a snapshot of a specific historical
 version is required. Hashing records what was read, not authenticity or source
 instrument identity.
 
+## Internal MarketFrame proposal
+
+`build_market_frame(candles_15m_dataset, candles_1h_dataset, *, base_asset,
+quote_asset, as_of)` combines two `LoadedDataset` inputs into a frozen
+`MarketFrameProposal`. The local version label is `market-frame-proposal-v0`.
+It is **not an approved shared MarketFrame schema**, a Strategy adapter,
+CandidateSignal, or authorization to trade. No indicator or strategy is run.
+
+From the repository root:
+
+```python
+from pathlib import Path
+from wallex.market import Timeframe, TimestampUnit, load_dataset, build_market_frame
+
+fixtures = Path("wallex/market/fixtures")
+settings = dict(symbol="SYNTHETIC-BASE-QUOTE",
+                timestamp_unit=TimestampUnit.SECONDS, as_of=903600)
+m15 = load_dataset(fixtures / "synthetic_frame_m15.jsonl",
+                   timeframe=Timeframe.M15, **settings)
+h1 = load_dataset(fixtures / "synthetic_frame_h1.jsonl",
+                  timeframe=Timeframe.H1, **settings)
+frame = build_market_frame(m15, h1, base_asset="BASE", quote_asset="QUOTE",
+                           as_of=903600)
+assert len(frame.candles_15m) == 21
+assert len(frame.candles_1h) == 250
+assert frame.snapshot_hash is None
+assert frame.data_quality.value == "INCOMPLETE"
+```
+
+The two new files are entirely **synthetic**, with constant OHLC values,
+M15 base volume 1 and H1 base volume 4. They share a decision cutoff of 903600
+UTC Unix seconds; both latest candles close exactly there. They do not represent
+any exchange market, account, permitted symbol, or strategy performance. The
+base/quote labels in this example are supplied explicitly, not parsed from the
+symbol. No cross-timeframe aggregation check or resampling is implemented.
+
+### History validation and freshness
+
+Both inputs must be `LoadedDataset` records with tuple candle collections. Their
+exact symbol labels and integer `as_of` values must agree; each dataset's cutoff
+must equal the requested frame cutoff. The first input must be M15 and the
+second H1. Asset identifiers must be explicit nonempty strings without whitespace
+or control characters, and must differ. Case is preserved; no asset registry or
+base/quote relationship is inferred from the symbol.
+
+The builder revalidates every candle, including directly constructed/frozen
+models. A candle's symbol and timeframe must agree with its dataset, and its
+normalized numeric fields must already be Decimal. Existing `normalize_candles`
+then checks the full history's values, timestamps, completion, continuity and
+cutoff. No raw string/integer numeric coercion is allowed at this normalized
+model boundary. Source timestamp-unit metadata is retained by the dataset, but
+revalidation always uses **seconds** because its candles are already normalized.
+Millisecond source data is never divided by 1000 a second time.
+
+Only after full data validation does each history have its warm-up and freshness
+checked. At least **21 consecutive M15** and **250 consecutive H1** completed bars
+are mandatory. Extra history is retained without trimming. Latest-close checks
+use the caller's explicit decision cutoff, never the wall clock:
+
+```text
+latest_close = last_candle.timestamp + interval
+expected_latest_close = (as_of // interval) * interval
+latest_close must equal expected_latest_close
+```
+
+For example, at `as_of=904500` the latest M15 close must be 904500, while the
+latest completed H1 close is 903600. An incomplete next H1 bar is not substituted.
+A continuous, sufficiently long history can still be stale and is rejected.
+Open/future rows reject the entire batch; there is no automatic prefix selection,
+sorting, gap filling, deduplication, or repair.
+
+### Output and incomplete quality
+
+| Field | Meaning in this proposal |
+| --- | --- |
+| `schema_version` | Fixed internal label `market-frame-proposal-v0`. |
+| `symbol`, `base_asset`, `quote_asset`, `as_of` | Validated explicit identity and decision cutoff. |
+| `candles_15m`, `candles_1h` | Revalidated tuples of normalized immutable `MarketCandle` records. |
+| `dataset_sha256_15m`, `dataset_sha256_1h` | Separate original file-byte hash claims copied from each input. |
+| `event_time`, `received_time` | Always `None`: frame-level meanings are not agreed. |
+| `best_bid`, `best_ask`, `spread_pct` | Always `None`: Quote is unavailable and spread semantics are pending. |
+| `depth_valid` | Always `False`: no Order Book evidence was supplied. |
+| `snapshot_hash` | Always `None`: canonical frame-hashing policy is not agreed. |
+| `data_quality` | Always `FrameQuality.INCOMPLETE` for a successfully built proposal. |
+| `quality_reasons` | Immutable tuple describing unavailable data and pending policies. |
+
+The quality reasons are `QUOTE_UNAVAILABLE`, `DEPTH_UNAVAILABLE`,
+`FRAME_TIME_SEMANTICS_PENDING`, `SNAPSHOT_HASH_POLICY_PENDING`, and
+`SHARED_SCHEMA_PENDING`. Missing financial/time information is not replaced by
+zero, candle timestamps, `as_of`, system time, or fabricated quotes.
+
+Successful construction means only the history checks passed. It does not mean
+the whole frame is complete, the strategy qualifies, risk passed, or an order
+may be sent. The proposal does not expose a trade authorization result. Use the
+builder for validated construction; the dataclass itself is an internal output
+container. Pending fields and schema/quality labels cannot be supplied as
+constructor arguments or changed through ordinary frozen-dataclass assignment.
+
+Dataset digests are checked for lowercase 64-character hexadecimal form and
+preserved separately. The builder has no original file bytes and cannot verify
+a hand-constructed dataset's claimed digest or source identity. It neither
+re-hashes normalized candles as file bytes nor merges the two claims into a
+`snapshot_hash`. File-byte provenance and canonical frame identity are distinct.
+
+### Frame errors
+
+`MarketFrameError` exposes `code`, `dataset`, `index` and `field`. The dataset
+location is `candles_15m_dataset` or `candles_1h_dataset` when applicable; `index`
+is a zero-based candle index, not a file line. Configuration/global mismatches
+have no invented candle index. A wrapped `MarketDataError` preserves its original
+code/index/field and is chained as `__cause__`.
+
+Frame-specific `FrameErrorCode` values are `INVALID_CONFIG`, `INVALID_DATASET`,
+`INVALID_DATASET_HASH`, `SYMBOL_MISMATCH`, `TIMEFRAME_MISMATCH`, `AS_OF_MISMATCH`,
+`CANDLE_METADATA_MISMATCH`, `INVALID_NORMALIZED_CANDLE`, `INSUFFICIENT_HISTORY`,
+and `STALE_HISTORY`. Insufficient-history errors include the required/available
+counts; stale-history errors include actual/expected close times.
+
+Validation stops at the first failure: explicit cutoff/assets, full M15 input
+validation/warm-up/freshness, then H1, then cross-dataset symbol equality. Invalid
+data raises rather than returning a partial or apparently complete frame.
+
+### Runnable synthetic example and open agreements
+
+```text
+python -B -m wallex.market.frame_example
+```
+
+This loads both fixture files through `load_dataset`, builds a proposal, and
+prints a summary with `evidence_kind="synthetic_fixture"`. It imports/runs no
+Strategy, Risk or Execution code. Its fixture paths are relative to the module,
+not the working directory. `build_synthetic_frame()` can also be imported from
+`wallex.market.frame_example`. Printed JSON is a human-readable summary, not a
+canonical serializer or frame-hash specification.
+
+Setayesh, Fatima and Roham still need to agree the shared schema/consumer
+adapters, frame versus Quote/Book source/received timestamp semantics, spread
+formula/units, canonical serialization and hash coverage, and actual data
+sources/markets/assets/API units. The suggested five-second Quote/Book freshness
+limit is **not finalized and is not implemented here**. No market selection,
+live-mode policy, or shared contract is established by this proposal.
+
 ## Tests
 
 From the repository root, without writing bytecode:
@@ -275,6 +419,7 @@ From the repository root, without writing bytecode:
 ```text
 python -B -m unittest wallex.market.test_normalization -v
 python -B -m unittest wallex.market.test_datasets -v
+python -B -m unittest wallex.market.test_frames -v
 python -B -m unittest discover -s wallex -p "test_*.py" -v
 ```
 
@@ -289,6 +434,13 @@ cover exact hashes and a single read snapshot, metadata/settings, line endings,
 repeatability/immutability, strict JSON/encoding errors, portable read failures,
 whole-file continuity and cutoff checks, error provenance, and the bundled
 synthetic fixture.
+
+Frame tests cover minimum counts, extra history, exact and intermediate time
+boundaries, stale-but-contiguous data, metadata mismatches, hand-constructed bad
+models, unchanged inputs, immutable/repeatable outputs, and deliberately missing
+fields. The full synthetic example is also run in a subprocess from an unrelated
+working directory with an assertion that no strategy/risk/execution module was
+imported.
 
 ## Team decisions still required
 
