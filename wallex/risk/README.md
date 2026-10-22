@@ -1,9 +1,9 @@
 # Risk calculations and provisional gate
 
-Purpose: pure theoretical position sizing and a separate minimal fail-closed
-quantity/notional gate. Neither calculation validity nor a gate decision is an
-order or complete risk authorization. Full portfolio/account risk authorization
-remains future work.
+Purpose: pure theoretical position sizing, local daily-loss/drawdown checks,
+and a separate minimal fail-closed quantity/notional gate. Calculation validity,
+passing local limits, and a gate decision are not orders or complete risk
+authorization. Full portfolio/account risk authorization remains future work.
 
 Ownership: Setayesh owns this directory, `wallex/strategy/`, and
 `wallex/infra/` only. Shared contracts, market, backtest, shadow, execution,
@@ -164,8 +164,9 @@ background tasks, or live-order paths in this calculation.
 Production integration still needs actual market/Quote freshness; approved Pe
 provenance; instrument lot/tick sizes; minimum/maximum quantities and minimum
 notional; validated fees/slippage and fee funding; existing positions/open orders;
-portfolio exposures and reservations; daily-loss and total-drawdown limits;
-exchange account availability; and explicit live-trading authorization.
+portfolio exposures and reservations; persistent account evidence/reset wiring
+for the local loss guards below; exchange account availability; and explicit
+live-trading authorization.
 One-position-only rules require account/portfolio state and are **not enforced**.
 Stop execution/fill outcomes and worst-case estimates are not guaranteed by these
 formulas. Shared units, evidence/version references and full risk-guard contracts
@@ -176,3 +177,124 @@ Run the complete suite without generating bytecode:
 ```text
 python -B -m unittest discover -s wallex -p "test_*.py" -v
 ```
+
+## Local daily loss and total drawdown guards
+
+`wallex.risk.loss_guards` provides frozen `LossGuardPolicy`, `LossGuardState`,
+and `LossGuardAssessment` records. Explicitly select
+`loss_policy_for(RiskProfile.L0)` or `loss_policy_for(RiskProfile.R0)` using the
+existing enum from `wallex.risk.sizing`. No profile is selected or activated by
+default. Only these agreed profile/fraction combinations are accepted, including
+when a caller directly constructs a policy; changed or malformed thresholds reject.
+The guard never calls sizing or `evaluate_entry`.
+
+| Profile | Daily loss fraction | Maximum drawdown fraction |
+| --- | --- | --- |
+| L0 | 0.005 = 0.50% | 0.01 = 1% |
+| R0 | 0.01 = 1% | 0.02 = 2% |
+
+Pass a `LossGuardState` explicitly to `assess_loss_guards(state=None)`. Every
+field is required evidence; its `None` default represents absence, not a balance,
+clock value, baseline, policy, or assumed False flag:
+
+| State field | Meaning and validation |
+| --- | --- |
+| `current_equity` | Positive finite Decimal account equity at the supplied observation time. |
+| `day_start_equity` | Positive finite Decimal equity at the start of the decision's UTC trading day. |
+| `high_water_equity` | Positive finite Decimal high-water equity supplied from the caller's verified history; must be at least both current and day-start equity. Never inferred or automatically updated here. |
+| `quote_asset` | Explicit common quote-unit identifier for all three valuations, preserving case; nonempty, at most 200 characters, without whitespace/control characters. |
+| `as_of` | Explicit nonnegative integer UTC Unix-second decision cutoff, excluding bool. |
+| `day_start_at` | UTC midnight containing as_of: `(as_of // 86400) * 86400`. |
+| `equity_observed_at` | Nonnegative integer UTC Unix seconds, required to satisfy `day_start_at <= equity_observed_at <= as_of`. A prior-day observation cannot stand in for current-day equity. |
+| `policy` | Explicit supported `LossGuardPolicy`; missing or mismatched policy evidence rejects. |
+| `prior_daily_breach`, `prior_drawdown_breach` | Required actual bools from historical state. Missing evidence fails closed; integers, Decimal zero, strings, and other truthy/falsy objects are not accepted. |
+
+Valuations must use the same explicitly declared quote currency and consistent
+account scope. The quote label alone does not verify their denominations or
+source identity; no conversion, account collection, or valuation is performed.
+**Proposed account equity includes unrealized PnL only if the future account data
+source provides a consistent mark-to-market valuation.** That source is not
+verified or implemented here. Deposits, withdrawals and other external cash flows
+need an agreed upstream baseline/valuation policy; these formulas do not isolate
+realized trading PnL or repair inconsistent account history.
+
+Daily equity loss and peak-to-current drawdown are different metrics:
+
+```text
+daily_loss = max(0, day_start_equity - current_equity)
+daily_loss_budget = day_start_equity * daily_loss_fraction
+current_drawdown = max(0, high_water_equity - current_equity)
+drawdown_budget = high_water_equity * max_drawdown_fraction
+```
+
+All four outputs are quote-unit amounts. Daily loss compares against the current
+UTC day's starting equity. Drawdown compares against the supplied historical
+high-water equity, which need not be today's start. A day can show a gain and
+still be below its historical peak; a gain never creates a negative daily loss.
+
+The guard blocks new entries when **any** condition is true:
+
+```text
+daily_loss >= daily_loss_budget
+current_drawdown >= drawdown_budget
+prior_daily_breach is True
+prior_drawdown_breach is True
+```
+
+**Equality blocks entry.** Synthetic starting/high-water equity 10000 quote gives
+L0 budgets 50 daily / 100 drawdown, and R0 budgets 100 / 200. Under L0, current
+equity 9950 with day start/high water 10000 reaches the daily limit. For drawdown
+alone, current/day-start equity 9900 and high water 10000 reaches the 100 limit
+with daily loss zero. Under R0, the analogous equality examples are current 9900
+for daily loss, or current/day-start 9800 for drawdown. These are synthetic
+references, not actual account evidence or live policy activation.
+
+Arithmetic reuses the sizing module's input representation bounds: at most 100
+coefficient digits and stored Decimal exponent [-200,200]. Equity differences and
+budget products use a private 512-digit Decimal context with fixed exponent bounds
+[-999,999] and inexact/rounded/overflow/underflow/subnormal/clamp/invalid-operation
+traps. It does not inherit or change caller settings. Exact `Fraction(Decimal)`
+identities independently validate all four amounts; breach comparisons use those
+exact values, with no division, floating-point conversion, or rounding at a limit.
+Any arithmetic or precision failure blocks entries without usable local evidence.
+
+For valid input, the result contains `calculation_valid=True`, the frozen supplied
+state, all four exact amounts, and stable reason codes. `blocks_new_entries=False`
+means only **these local loss-limit checks** found no blocking condition; it is
+not complete portfolio risk permission. `WITHIN_LOCAL_LIMITS` describes that narrow
+case. Breaches retain evidence and report `DAILY_LOSS_LIMIT_REACHED`,
+`DRAWDOWN_LIMIT_REACHED`, `PREVIOUS_DAILY_BREACH`, and/or
+`PREVIOUS_DRAWDOWN_BREACH` in that order.
+
+Malformed or missing state has `calculation_valid=False`,
+`blocks_new_entries=True`, an explicit reason/rejection field, and no state,
+amounts, or latched-flag evidence in the result. Relevant failures include missing
+history/flags/policy, invalid types/equity/identity, inconsistent high-water or UTC
+baselines, numeric range, arithmetic, and precision errors. Every assessment has
+permanently `executable_ready=False`, even when within local limits.
+
+## Breach latches, persistence and authorization boundaries
+
+`daily_breach_latched` is the current daily breach OR `prior_daily_breach`;
+`drawdown_breach_latched` is the current drawdown breach OR its prior flag. A
+previous breach remains blocking after equity recovery. These are returned latch
+proposals for the future persistent account adapter; the source state is never
+mutated and nothing is persisted by this pure module. Repeated calls are
+deterministic, and no hidden in-memory history or automatic reset exists.
+
+Changing UTC days does **not** clear a True prior daily flag. An eventual daily
+reset must be tied to verified new-day state and an agreed persistent reset
+policy, not wall clock, a new function call, or a runtime transition. The account
+adapter must durably retain/reload high-water marks, day identity/baselines, and
+breach flags across runtime restarts before supplying new-entry evidence.
+
+Timestamp ordering is not proof of source authenticity or live freshness. No
+maximum observation age within the day, external-source verification, account
+availability, or automatic mark-to-market computation is implemented. Passing
+local limits does not enforce positions, pending orders, concurrent reservations,
+future trade-loss commitments, account valuation correctness, live evidence
+freshness, or exchange trading rules. It does not issue a quantity, CandidateSignal,
+TradeIntent, Agent approval, full risk authorization, runtime activation, or order.
+Sizing, the provisional gate, and these local loss guards remain separate pure
+checks until explicitly integrated with the agreed portfolio/account contracts.
+No teammate modules, shared contracts, or live API paths are changed.
