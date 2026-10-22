@@ -310,3 +310,90 @@ class AccountSnapshot:
         identifier(self.unknown_reason)
         if self.schema_version != SCHEMA_VERSION:
             raise ContractError("Unsupported account schema version.")
+
+
+@dataclass(frozen=True)
+class OrderObservation:
+    """Explicit synthetic source evidence, not an account snapshot."""
+
+    account_id: str
+    client_id: str
+    symbol: str
+    source: str
+    source_order_id: str | None
+    state: OrderState
+    cumulative_filled_quantity: Decimal
+    fills: tuple[Fill, ...]
+    observed_at: datetime
+    source_time: datetime | None
+    source_time_unknown_reason: str | None
+    schema_version: str = SCHEMA_VERSION
+
+    def __post_init__(self):
+        for name in ("account_id", "client_id", "symbol", "source"):
+            identifier(getattr(self, name))
+        if self.source_order_id is None:
+            if self.state != OrderState.REJECTED:
+                raise ContractError("Accepted order evidence requires a stable source order ID.")
+        else:
+            identifier(self.source_order_id)
+        if not isinstance(self.state, OrderState) or self.state not in {
+            OrderState.WORKING, OrderState.PARTIAL, OrderState.FILLED, OrderState.CANCELED, OrderState.REJECTED
+        }:
+            raise ContractError("Only observed source receipt states are accepted.")
+        amount(self.cumulative_filled_quantity, zero=True)
+        if not isinstance(self.fills, tuple) or not all(isinstance(fill, Fill) for fill in self.fills):
+            raise ContractError("Fill evidence must be a tuple of actual Fill consumers.")
+        object.__setattr__(self, "observed_at", utc(self.observed_at))
+        if self.source_time is None:
+            identifier(self.source_time_unknown_reason)
+        else:
+            object.__setattr__(self, "source_time", utc(self.source_time))
+            if self.source_time_unknown_reason is not None:
+                raise ContractError("Known source time cannot have an unknown reason.")
+        if self.schema_version != SCHEMA_VERSION:
+            raise ContractError("Unsupported observation schema.")
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OrderObservation":
+        data = dict(data)
+        data["state"] = OrderState(data["state"])
+        data["cumulative_filled_quantity"] = Decimal(data["cumulative_filled_quantity"])
+        data["fills"] = tuple(Fill.from_dict(fill) for fill in data["fills"])
+        for name in ("observed_at", "source_time"):
+            if data[name] is not None:
+                data[name] = datetime.fromisoformat(data[name])
+        return cls(**data)
+
+
+@dataclass(frozen=True)
+class ExecutionReceipt:
+    intent_id: str
+    client_id: str
+    account_id: str
+    symbol: str
+    mode: Mode
+    state: OrderState
+    run_id: str
+    trace_id: str
+    request_fingerprint: str
+    references: DecisionReferences
+    base_asset: str
+    quote_asset: str
+    ordered_quantity_base: Decimal
+    cumulative_filled_quantity: Decimal | None
+    remaining_quantity_base: Decimal | None
+    last_observation: OrderObservation | None
+    fills: tuple[Fill, ...]
+    reservation: Reservation
+    reservation_held: bool
+    uncertainty_reason: str | None
+    known_net_acquired_base: Decimal | None
+    net_quantity_unknown_reason: str | None
+    sellable_quantity_base: None = None
+    sellable_unknown_reason: str = "account_free_balance_not_reconciled"
+    reconciliation_scope: str = "synthetic_order_only"
+    schema_version: str = SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        return json_value(self)

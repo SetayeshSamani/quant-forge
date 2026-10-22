@@ -5,7 +5,10 @@ from decimal import Decimal
 
 from wallex.risk import EntryRequest, RiskLimits, evaluate_entry
 
-from .models import DecisionReferences, ExecutionRequest, Mode, Reservation, Side, TradeIntent
+from .models import (
+    DecisionReferences, ExecutionRequest, Mode, OrderObservation, OrderState,
+    Reservation, Side, TradeIntent,
+)
 
 
 FIXTURE_TIME = datetime(2026, 10, 22, 0, 0, tzinfo=timezone.utc)
@@ -26,3 +29,11 @@ def synthetic_request(*, intent_id="fixture-intent-1", client_id="fixture-client
                                                None, "agent_not_integrated_in_fixture"),
                             Reservation("QUOTE", Decimal("21"), Decimal("100")),
                             "synthetic_fixture")
+
+
+def synthetic_observation(request=None, *, state=OrderState.WORKING, cumulative=Decimal(0),
+                          fills=(), observed_at=FIXTURE_TIME, source_order_id="fixture-order-1"):
+    intent = (request or synthetic_request()).intent
+    return OrderObservation(intent.account_id, intent.client_id, intent.symbol, "synthetic-venue",
+                            source_order_id, state, cumulative, tuple(fills), observed_at,
+                            observed_at, None)

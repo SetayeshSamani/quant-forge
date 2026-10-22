@@ -9,7 +9,8 @@ from pathlib import Path
 import sqlite3
 
 from wallex.execution.models import (
-    ContractError, ExecutionRequest, Mode, OrderState, canonical_json, decimal_text,
+    ContractError, ExecutionReceipt, ExecutionRequest, Mode, OrderObservation, OrderState,
+    canonical_json, decimal_text,
     exact_sum, identifier, json_value, utc,
 )
 from wallex.risk import RiskReason
@@ -34,6 +35,10 @@ class ReservationExceeded(LedgerError):
 
 
 class StateConflict(LedgerError):
+    pass
+
+
+class ObservationError(LedgerError):
     pass
 
 
@@ -232,6 +237,93 @@ class Ledger:
             return self._event(db, kind, account_id=account_id, run_id=run_id, trace_id=trace_id,
                                at=at, payload=payload, intent_id=intent_id)
 
+    @classmethod
+    def _matching(cls, db, request: ExecutionRequest) -> IntentRecord | None:
+        intent = request.intent
+        rows = db.execute("SELECT * FROM intents WHERE intent_id=? OR (account_id=? AND client_id=?)",
+                          (intent.intent_id, intent.account_id, intent.client_id)).fetchall()
+        if not rows:
+            return None
+        if (len(rows) != 1 or rows[0]["fingerprint"] != request.fingerprint
+                or rows[0]["request_json"] != canonical_json(request)):
+            raise IdentityConflict("Intent/client identity already belongs to a different canonical request.")
+        return cls._record(rows[0])
+
+    def existing(self, request: ExecutionRequest) -> IntentRecord | None:
+        with self._transaction() as db:
+            return self._matching(db, request)
+
+    @staticmethod
+    def _last_observation(db, intent_id: str) -> OrderObservation | None:
+        row = db.execute("SELECT payload_json FROM audit_events WHERE intent_id=? "
+                         "AND kind='order_observed' ORDER BY event_seq DESC LIMIT 1", (intent_id,)).fetchone()
+        return OrderObservation.from_dict(json.loads(row[0])["observation"]) if row else None
+
+    def observe(self, intent_id: str, observation: OrderObservation, *, expected_version: int,
+                at: datetime) -> IntentRecord:
+        if not isinstance(observation, OrderObservation):
+            raise ObservationError("Expected a typed synthetic order observation.")
+        observation = OrderObservation.from_dict(json_value(observation))
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM intents WHERE intent_id=?", (identifier(intent_id),)).fetchone()
+            if (row is None or row["version"] != expected_version or OrderState(row["state"]) not in
+                    {OrderState.SUBMITTING, OrderState.RECONCILING, OrderState.CANCEL_PENDING}):
+                raise StateConflict("Observation requires the current in-progress control state.")
+            record = self._record(row)
+            intent = record.request.intent
+            if (observation.account_id, observation.client_id, observation.symbol) != (
+                    intent.account_id, intent.client_id, intent.symbol):
+                raise ObservationError("Source identity differs from the persisted order.")
+            if record.source_order_id is not None and record.source_order_id != observation.source_order_id:
+                raise ObservationError("Stable source order identity changed.")
+            previous = self._last_observation(db, intent_id)
+            if previous is not None:
+                if observation.observed_at < previous.observed_at:
+                    raise ObservationError("A stale source observation cannot replace newer evidence.")
+                if previous.state == OrderState.FILLED and observation.state != OrderState.FILLED:
+                    raise ObservationError("A filled order cannot return to an open state.")
+                if previous.state == OrderState.CANCELED and observation.state not in {OrderState.CANCELED, OrderState.FILLED}:
+                    raise ObservationError("A canceled order cannot return to an open state.")
+                if previous.state == OrderState.REJECTED and observation.state != OrderState.REJECTED:
+                    raise ObservationError("Conflicting evidence after rejection requires manual review.")
+                if observation.cumulative_filled_quantity < previous.cumulative_filled_quantity:
+                    raise ObservationError("Cumulative fill quantity cannot decrease.")
+            # Nonzero/fill support is introduced by the next coherent change.
+            if observation.fills or observation.cumulative_filled_quantity != 0:
+                raise ObservationError("Fill reconciliation is not implemented by this checkpoint.")
+            if observation.state not in {OrderState.WORKING, OrderState.CANCELED, OrderState.REJECTED}:
+                raise ObservationError("Receipt state needs complete fill evidence.")
+            db.execute("UPDATE intents SET state=?,version=version+1,source_order_id=?,"
+                       "reported_filled_quantity=?,uncertainty_reason=NULL,last_observed_at=? WHERE intent_id=?",
+                       (observation.state.value, observation.source_order_id,
+                        decimal_text(observation.cumulative_filled_quantity),
+                        json_value(observation.observed_at), intent_id))
+            self._event(db, "order_observed", account_id=intent.account_id, run_id=intent.run_id,
+                        trace_id=intent.trace_id, at=at, intent_id=intent_id,
+                        payload={"observation": observation, "version": expected_version + 1})
+            return self._record(db.execute("SELECT * FROM intents WHERE intent_id=?", (intent_id,)).fetchone())
+
+    def receipt(self, intent_id: str) -> ExecutionReceipt:
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM intents WHERE intent_id=?", (identifier(intent_id),)).fetchone()
+            if row is None:
+                raise LedgerError("Unknown intent identity.")
+            record = self._record(row)
+            intent = record.request.intent
+            observation = self._last_observation(db, intent_id)
+            unresolved = record.state in {OrderState.PLANNED, OrderState.SUBMITTING, OrderState.UNKNOWN,
+                                         OrderState.RECONCILING, OrderState.CANCEL_PENDING}
+            filled = None if unresolved else record.reported_filled_quantity
+            remaining = (exact_sum((intent.quantity_base, filled.copy_negate()))
+                         if filled is not None else None)
+            return ExecutionReceipt(intent.intent_id, intent.client_id, intent.account_id, intent.symbol,
+                                    intent.mode, record.state, intent.run_id, intent.trace_id,
+                                    record.request.fingerprint, record.request.references,
+                                    intent.base_asset, intent.quote_asset, intent.quantity_base,
+                                    filled, remaining, observation, (), record.request.reservation,
+                                    record.reservation_held, record.uncertainty_reason, None,
+                                    "fill_accounting_not_yet_available")
+
     def events(self, intent_id: str | None = None) -> tuple[AuditEvent, ...]:
         with self._transaction() as db:
             query = "SELECT * FROM audit_events"
@@ -257,14 +349,9 @@ class Ledger:
         intent, reservation = request.intent, request.reservation
         encoded, fingerprint = canonical_json(request), request.fingerprint
         with self._transaction() as db:
-            rows = db.execute(
-                "SELECT * FROM intents WHERE intent_id=? OR (account_id=? AND client_id=?)",
-                (intent.intent_id, intent.account_id, intent.client_id),
-            ).fetchall()
-            if rows:
-                if len(rows) != 1 or rows[0]["fingerprint"] != fingerprint or rows[0]["request_json"] != encoded:
-                    raise IdentityConflict("Intent/client identity already belongs to a different canonical request.")
-                return self._record(rows[0]), False
+            existing = self._matching(db, request)
+            if existing is not None:
+                return existing, False
             total = exact_sum((self._reserved(db, intent.account_id, reservation.asset), reservation.amount))
             if total > reservation.capacity_limit:
                 raise ReservationExceeded("Aggregate held reservation exceeds the explicit supplied capacity.")
