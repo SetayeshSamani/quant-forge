@@ -33,6 +33,10 @@ class ReservationExceeded(LedgerError):
     pass
 
 
+class StateConflict(LedgerError):
+    pass
+
+
 @dataclass(frozen=True)
 class IntentRecord:
     request: ExecutionRequest
@@ -147,6 +151,54 @@ class Ledger:
             rows = db.execute("SELECT * FROM intents WHERE account_id=? ORDER BY intent_id",
                               (identifier(account_id),)).fetchall()
             return tuple(self._record(row) for row in rows)
+
+    def writer(self, account_id: str):
+        from .writer import account_writer
+        return account_writer(self.path, account_id)
+
+    def transition(self, intent_id: str, target: OrderState, *, expected_version: int,
+                   at: datetime, reason: str) -> IntentRecord:
+        """Only control states; receipt states require source observations separately."""
+        allowed = {
+            OrderState.SUBMITTING: {OrderState.PLANNED},
+            OrderState.CANCEL_PENDING: {OrderState.WORKING, OrderState.PARTIAL},
+            OrderState.RECONCILING: set(OrderState),
+            OrderState.UNKNOWN: {OrderState.SUBMITTING, OrderState.CANCEL_PENDING,
+                                 OrderState.RECONCILING, OrderState.UNKNOWN},
+        }
+        if not isinstance(target, OrderState) or target not in allowed or type(expected_version) is not int:
+            raise StateConflict("Unsupported control transition or version.")
+        identifier(reason)
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM intents WHERE intent_id=?", (identifier(intent_id),)).fetchone()
+            if row is None or row["version"] != expected_version or OrderState(row["state"]) not in allowed[target]:
+                raise StateConflict("Order state/version changed; do not perform an external action.")
+            record = self._record(row)
+            db.execute("UPDATE intents SET state=?, version=version+1, uncertainty_reason=? "
+                       "WHERE intent_id=? AND version=?",
+                       (target.value, reason, intent_id, expected_version))
+            intent = record.request.intent
+            self._event(db, f"order_{target.value.lower()}", account_id=intent.account_id,
+                        run_id=intent.run_id, trace_id=intent.trace_id, at=at, intent_id=intent_id,
+                        payload={"from": record.state, "to": target, "reason": reason,
+                                 "version": expected_version + 1})
+            return self._record(db.execute("SELECT * FROM intents WHERE intent_id=?", (intent_id,)).fetchone())
+
+    def reject_unsubmitted(self, intent_id: str, *, expected_version: int, at: datetime,
+                           reason: str) -> IntentRecord:
+        """Only a never-submitted PLANNED record can release its reservation here."""
+        identifier(reason)
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM intents WHERE intent_id=?", (identifier(intent_id),)).fetchone()
+            if row is None or row["state"] != OrderState.PLANNED.value or row["version"] != expected_version:
+                raise StateConflict("Cannot release a submitted or changed order reservation.")
+            record = self._record(row)
+            db.execute("UPDATE intents SET state='REJECTED', version=version+1, reservation_held=0, "
+                       "uncertainty_reason='never_submitted' WHERE intent_id=?", (intent_id,))
+            intent = record.request.intent
+            self._event(db, "unsubmitted_rejected", account_id=intent.account_id, run_id=intent.run_id,
+                        trace_id=intent.trace_id, at=at, intent_id=intent_id, payload={"reason": reason})
+            return self._record(db.execute("SELECT * FROM intents WHERE intent_id=?", (intent_id,)).fetchone())
 
     @staticmethod
     def _reserved(db, account_id: str, asset: str) -> Decimal:

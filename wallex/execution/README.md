@@ -54,5 +54,6 @@ Use the existing standard-library environment from the repository root:
 python -B -m unittest discover -s wallex -p 'test_*.py' -v
 ```
 
-The next commits add the durable ledger and injected replay gateway. Live remains
-unavailable; no REST/MCP order submission, credentials or funded account is used.
+The durable ledger is documented in [../audit/README.md](../audit/README.md).
+The next stacked branch adds the injected replay gateway. Live remains unavailable;
+no REST/MCP order submission, credentials or funded account is used.
