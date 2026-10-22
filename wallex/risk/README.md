@@ -1,9 +1,9 @@
 # Risk calculations and provisional gate
 
-Purpose: pure theoretical position sizing, local daily-loss/drawdown checks,
-and a separate minimal fail-closed quantity/notional gate. Calculation validity,
-passing local limits, and a gate decision are not orders or complete risk
-authorization. Full portfolio/account risk authorization remains future work.
+Purpose: pure theoretical sizing, local loss limits, read-only portfolio entry
+checks, and a separate provisional quantity/notional gate. Passing local checks
+does not grant complete risk or execution authorization. Verified account
+integration and atomic admission remain future work.
 
 Ownership: Setayesh owns this directory, `wallex/strategy/`, and
 `wallex/infra/` only. Shared contracts, market, backtest, shadow, execution,
@@ -167,7 +167,8 @@ notional; validated fees/slippage and fee funding; existing positions/open order
 portfolio exposures and reservations; persistent account evidence/reset wiring
 for the local loss guards below; exchange account availability; and explicit
 live-trading authorization.
-One-position-only rules require account/portfolio state and are **not enforced**.
+Sizing does not enforce one-position-only rules; the portfolio guard below
+checks supplied snapshots without making admission atomic.
 Stop execution/fill outcomes and worst-case estimates are not guaranteed by these
 formulas. Shared units, evidence/version references and full risk-guard contracts
 must be agreed with their owners before any executable integration.
@@ -175,7 +176,7 @@ must be agreed with their owners before any executable integration.
 Run the complete suite without generating bytecode:
 
 ```text
-python -B -m unittest discover -s wallex -p "test_*.py" -v
+python -B -m unittest discover -s wallex -p "test_*.py" -q
 ```
 
 ## Local daily loss and total drawdown guards
@@ -298,3 +299,96 @@ TradeIntent, Agent approval, full risk authorization, runtime activation, or ord
 Sizing, the provisional gate, and these local loss guards remain separate pure
 checks until explicitly integrated with the agreed portfolio/account contracts.
 No teammate modules, shared contracts, or live API paths are changed.
+
+## Read-only portfolio entry guard
+
+`wallex.risk.portfolio_guards.assess_portfolio_entry(state=None)` accepts a frozen
+local `PortfolioGuardState` and returns a frozen `PortfolioGuardAssessment` with
+immutable `PortfolioGuardReason` codes. This is a provisional consumer boundary,
+not a shared schema or a connected/verified account adapter.
+
+TP-1 permits at most **one active spot position across the relevant trading
+account**. For a new BUY, any existing position blocks entry; multiple positions
+also report `MULTIPLE_POSITIONS_DETECTED`. Checks cover the whole account, not
+only the proposed symbol or selected quote asset. Required explicit fields are:
+
+| State fields | Required meaning |
+| --- | --- |
+| `account_id`, `quote_asset` | Exact nonblank identifiers, at most 200 characters, without control characters or surrounding whitespace; quote asset permits no whitespace. Account IDs preserve internal spaces consistently with the inspected Execution identifier contract. |
+| `as_of`, `snapshot_observed_at` | Nonnegative integer UTC Unix seconds, excluding bool. No wall clock is used. |
+| `max_snapshot_age_seconds` | Nonnegative integer seconds, explicitly supplied by the caller, with no activated/approved global default. |
+| `open_position_count` | Account-wide active spot positions. |
+| `outstanding_order_count` | All outstanding orders, including pending BUY and SELL. |
+| `uncertain_order_count` | UNKNOWN or otherwise unreconciled orders. |
+| `held_reservation_count` | All held account reservations, independently of outstanding orders or apparent terminal receipts. |
+| `unsettled_fill_count` | Unresolved fill/position/settlement uncertainty. |
+| `positions_complete`, `orders_complete`, `reservations_complete`, `settlement_complete`, `account_scope_complete` | All required actual bool completeness claims, each explicitly True to proceed. |
+
+Counts must be actual nonnegative integers, excluding bool; they may overlap and
+are not inferred from one another. Every field defaults to `None` only to represent
+missing evidence. Missing counts never mean zero and missing flags never mean True.
+The quote label does not filter out positions, orders or reservations in other
+assets within the relevant account scope. The future account adapter must supply
+coherent complete aggregates; this function cannot verify their source authenticity.
+
+Age is calculated exactly with integers and must satisfy:
+
+```text
+0 <= as_of - snapshot_observed_at <= max_snapshot_age_seconds
+```
+
+An observation after the cutoff reports `FUTURE_ACCOUNT_SNAPSHOT`; age above the
+caller-supplied limit reports `STALE_ACCOUNT_SNAPSHOT`. Equality is accepted. An
+explicit zero age limit requires observation exactly at the supplied cutoff,
+not an inferred current wall-clock time. Validating this provisional age policy
+does not establish its approval or actual source freshness.
+
+After complete/fresh snapshot validation, **any positive count blocks new BUY
+entries**, with distinct reasons for positions, outstanding orders, uncertain
+orders, held reservations, and unsettled fills. A valid blocked snapshot retains
+its evidence. Invalid, missing, incomplete, future, or stale evidence returns
+`snapshot_valid=False`, `blocks_new_entries=True`, no state/age evidence, and a
+reason plus rejected field. A complete flat snapshot reports
+`NO_LOCAL_PORTFOLIO_BLOCKER` and `blocks_new_entries=False`; `snapshot_valid=True`
+means local snapshot checks only. **Every result has fixed
+`executable_ready=False`.** No quantity, approval, TradeIntent, order or admission
+token is produced; no gate/sizing/loss guard or runtime action is called.
+
+## Audit/Execution and concurrency boundary
+
+Read-only review of draft PR #4 (`feat/audit-intent-ledger`) and its dependent
+PR #5 (`feat/execution-replay-reconciliation`) confirms durable intent/client
+identities, held capacity reservations, account writers and uncertainty recovery.
+The future aggregate producer must include `PLANNED`, `SUBMITTING`, `WORKING`,
+`PARTIAL` and `CANCEL_PENDING` orders and conservatively represent `UNKNOWN` and
+`RECONCILING` uncertainty. UNKNOWN never means canceled/rejected/unfilled. Apparent
+terminal status does not prove a flat/settled account or release a held reservation.
+The guard does not implement an order-state mapper, lifecycle or reservation release.
+Current Execution `AccountSnapshot` and order-only recovery do not establish
+verified balances or complete portfolio coverage; explicit consumer mapping remains
+pending. Its aware UTC datetime evidence also needs an agreed exact conversion
+policy for this local integer-second interface.
+
+Two callers can both pass the **same immutable flat snapshot**: the assessment
+neither consumes capacity nor records an entry. It cannot eliminate concurrent
+duplicate admission/submission. A passing local result must be revalidated inside
+the agreed authoritative admission protocol using teammate-owned durable Audit
+`Ledger.plan`, stable intent/client identities, capacity reservations and the
+single-writer protocol. The existing ledger is not claimed to enforce this new
+portfolio predicate automatically. No parallel ledger, database, lock, lease,
+client-ID generator or order lifecycle is added here.
+
+This guard applies only to **new entries**. Position closing, emergency exits,
+cancellation and reconciliation are not new BUY attempts and must not be routed
+through it as exit permission. No exit-blocking behavior is implemented. Full
+account/risk authorization, atomic source/ledger revalidation, reservations,
+verified evidence and live execution remain separate pending integration tasks.
+PRs #4/#5, teammate modules and shared contracts are unchanged.
+
+Run focused tests first, then the complete regression suite, without bytecode or
+verbose passing logs:
+
+```text
+python -B -m unittest wallex.risk.test_portfolio_guards -q
+python -B -m unittest discover -s wallex -p "test_*.py" -q
+```
