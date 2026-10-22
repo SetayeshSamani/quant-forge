@@ -94,3 +94,28 @@ Official specification snapshots inspected (public documentation only):
 
 - [Trade Credit OpenAPI](https://developers.wallex.ir/assets/files/trade-credit-ff5c60b5b97b77a5b2c2e4800f07729c.yaml): SHA-256 `d8141055d11f6fa63867f70d3d0449af2bf7c5d86f67eab7f0d37e73ba3395eb`.
 - [Shared order API Swagger](https://developers.wallex.ir/assets/files/spot-b9d06896d1009adc9ebc69b9a5495e7e.json): SHA-256 `10d8667602b3f82428b7a35688174449843e6ed36c9de816050dccc3e6a69753`.
+
+## Authentication follow-up ? 2026-10-23
+
+Owner-reported: `GET /sub-accounts` returns 200; `GET
+/v1/prop/user/packages/active` returns 401. No private request was made for this
+review. The public OpenAPI was retrieved again; its SHA-256 matches the snapshot
+above.
+
+- CONFIRMED: both operations declare `security: [{x-api-key: []}]`; the scheme
+  is the `x-api-key` header. [Official OpenAPI](https://developers.wallex.ir/assets/files/trade-credit-ff5c60b5b97b77a5b2c2e4800f07729c.yaml).
+- CONFIRMED: [account discovery](https://developers.wallex.ir/docs/generated/active-sub-accounts-list)
+  declares no endpoint-specific custom header; [active-plan detail](https://developers.wallex.ir/docs/generated/active-user-package-details)
+  documents `sub-account-client-id` (the parameter lacks `required: true`). The
+  current GET-only client already sends both headers with the same supplied key
+  and selected account; no documented extra authentication header was found.
+- UNCLEAR: whether these management operations accept the same Trade Credit key
+  and read permission. [Credit-key guidance](https://developers.wallex.ir/docs/spot-intro)
+  explicitly covers trading, not a management-endpoint access matrix. Discovery
+  success does not establish active-plan authorization; the 401 cause is unverified.
+
+**Blocker:** obtain official Wallex confirmation of API-key account scope,
+read-permission eligibility and required headers for the active-plan operation.
+Credit-plan collection remains unavailable on 401: no partial evidence bundle,
+credential fallback, cookies, session tokens or authentication bypass. No code
+changed; `NO_TRADE` and `executable_ready=False` remain enforced.
