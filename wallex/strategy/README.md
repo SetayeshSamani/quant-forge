@@ -1,7 +1,8 @@
 # TP-1 strategy and technical indicators
 
-Purpose: deterministic EMA and Wilder ATR calculations for the TP-1 Trend
-Pullback strategy. The foundation engine remains a scaffold: every call to
+Purpose: deterministic EMA, Wilder ATR, and H1 trend eligibility for the
+TP-1 Cost-Aware Trend Pullback strategy. The foundation engine remains a
+scaffold: every call to
 `engine.evaluate()` returns `NO_TRADE`, including when placeholder inputs are
 valid. Indicators do not generate confirmed signals or authorize entries.
 
@@ -81,6 +82,56 @@ candle cannot enter an earlier M15 decision merely because its completion
 flag is true. A batch containing bars beyond `as_of` is rejected in full;
 the caller must select the appropriate completed prefix. No future records
 are silently discarded. H1 aggregation/resampling is not implemented.
+
+## H1 trend filter
+
+Import `assess_hourly_trend` from `wallex.strategy.trend`. Its provisional
+interface is `assess_hourly_trend(candles=None, *, as_of) -> TrendAssessment`.
+The explicit cutoff uses the same UTC Unix seconds as the indicator interfaces.
+This filter checks only these two strict conditions, both of which must hold:
+
+```text
+EMA20[h] > EMA50[h]
+EMA20[h] > EMA20[h-3]
+```
+
+Here h is the latest supplied completed H1 candle. Both EMA series reuse the
+existing SMA-seeded implementation and its fixed Decimal context. EMA20 and
+EMA50 mathematically need 20 and 50 bars, but the trend filter always requires
+at least **250 completed, contiguous H1 candles** before evaluating either
+condition. The EMA20 slope reference is exactly three completed H1 bars before
+the latest one (10,800 seconds between close times). It is not a comparison
+against the last one or two bars, and does not require each intermediate bar
+to have a rising EMA20. Equality in either condition is a rejection.
+
+`TrendAssessment` is frozen and contains `eligible`, a tuple of `TrendReason`
+values, and the evidence fields `ema20`, `ema50`, `ema20_three_bars_ago`,
+`latest_closed_at`, and `slope_reference_closed_at`. Evidence timestamps are
+candle **close** times in UTC Unix seconds. Passing both conditions reports
+`TREND_CONDITIONS_MET`. Valid but ineligible data reports
+`EMA20_NOT_ABOVE_EMA50` and/or `EMA20_NOT_RISING_THREE_BARS`, in that order.
+Those results retain the actual calculated EMA evidence.
+
+Missing/malformed data, invalid OHLC, duplicate/unsorted/unaligned timestamps,
+missing H1 bars, incomplete candles, or a bar closing after `as_of` produce
+`eligible=False` with `INVALID_DATA`. Short valid history produces
+`INSUFFICIENT_HISTORY`; unrepresentable indicator arithmetic produces
+`INDICATOR_ARITHMETIC_ERROR`. These failures contain no invented EMA evidence.
+A future or incomplete row rejects the entire input rather than being silently
+dropped. Nothing is forward-filled, resampled, or fetched externally.
+
+A close exactly at `as_of` is available; a close one second later is not.
+The caller must supply the completed prefix for the intended decision. The
+filter does not read the wall clock or infer freshness: old but otherwise valid
+history remains evaluable. A future MarketFrame adapter must enforce the
+team-approved freshness policy, instrument identity, H1 interval, and timestamp
+semantics. The local Candle record and TrendAssessment are not shared contracts.
+
+Trend eligibility is not a pullback signal, CandidateSignal, AgentDecision,
+RiskDecision, or executable TradeIntent. Cost checks, stop-loss calculations,
+position sizing, and exchange execution are outside this filter. The existing
+`engine.evaluate()` still always returns `NO_TRADE`; its contracts and behavior
+are unchanged. No risk, infra, or teammate-owned module is modified.
 
 ## Limitations and planned integration
 
