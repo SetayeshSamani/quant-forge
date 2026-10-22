@@ -88,3 +88,53 @@ remain pending; see `docs/WALLEX_CREDIT_API_AUDIT.md`. No key was read or reques
 python -B -m unittest wallex.infra.test_credit_account -q
 python -B -m unittest discover -s wallex -p "test_*.py" -q
 ```
+
+## Opt-in read-only credit client
+
+`credit_readonly.CreditReadOnlyClient` requires injected `GetTransport`, logical
+credential resolver and UTC Unix-second observation clock. Import/construction
+performs no HTTP or key lookup. `ReadOnlyConfig(credential_reference=...)`
+defaults to `opt_in=False` and `scope=UNVERIFIED`; it sends nothing and does not
+invoke the resolver. There is no environment/.env loader or actual key in config.
+For FUTURE local read verification, the owner must explicitly attest the matching
+Trade Credit sub-account and read permission, set the corresponding scope and
+opt in. These are declarations, not proof of the existing key's actual ownership.
+No trading/withdrawal permission is inferred or exposed.
+
+Only these exact paths are available, using GET on `https://api.wallex.ir`:
+
+- `/sub-accounts`
+- `/v1/prop/user/packages/active`
+- `/v1/account/balances-detail`
+
+Every request includes the explicitly selected sub-account and resolved credential
+in headers; there is no main-account/key fallback. The optional future
+`UrllibGetTransport` enforces the same route allowlist, normal TLS/hostname
+verification, no redirects or ambient proxies, request timeout and bounded body
+reads. There are no write methods, retries or background work. Mocks use fake
+credentials only; no authenticated Wallex call was performed for this feature.
+401/403/404/429/5xx, timeout, malformed/oversized JSON, inconsistent scope and clock
+failures return safe codes without body/exception/header details or partial bundles.
+
+Discovery has a **one-page budget** plus an explicit row limit. Audited docs do
+not specify discovery request paging parameters; partial/inconsistent pages are
+rejected rather than inventing page queries or claiming full coverage. Confirm a
+provider pagination contract before adding multi-page discovery. JSON duplicate
+keys/nonfinite tokens fail. Only required wire fields are retained; messages,
+headers and unknown metadata are omitted. Secret reflections in retained fields
+reject the read. Request/reply/bundle reprs omit authentication and body data.
+
+A successful `CreditReadBundle` preserves immutable sanitized JSON and each actual
+observation time; it contains no credit-risk interpretation. Explicitly call
+`bundle.for_assessment(semantics=..., as_of=..., max_age_seconds=...)` to produce
+fresh CREDIT-02 inputs, then use the existing `assess_credit_account` if desired.
+Collection is not approval: all client results retain `NO_TRADE`,
+`executable_ready=False` and `credential_scope_verified=False`. Existing credit
+semantics, account provenance, freshness/admission policy and reconciliation
+remain unapproved. No actual API key is requested, stored or logged by the client;
+only transient request headers can carry a resolver result after explicit opt-in.
+
+```text
+python -B -m unittest wallex.infra.test_credit_readonly -q
+python -B -m unittest discover -s wallex -p "test_*.py" -q
+```
