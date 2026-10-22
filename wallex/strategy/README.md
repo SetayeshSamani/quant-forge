@@ -209,6 +209,12 @@ finite `Decimal`; floats, strings, integers, booleans, missing values, and
 nonfinite prices are rejected without coercion. There is **no fallback to the
 latest candle close**, and a caller-supplied price is not proof of a fillable entry.
 
+`entry_price` represents Pe, the maximum permitted BUY price, supplied explicitly
+by the caller. Pe is not automatically the latest candle closing price and is
+not necessarily the final fill price. Its source and freshness must be validated
+by the future market/execution integration. Stop calculations do not authorize
+trading. Risk sizing must use the approved Pe and applicable cost assumptions.
+
 For the latest completed M15 candle t:
 
 ```text
