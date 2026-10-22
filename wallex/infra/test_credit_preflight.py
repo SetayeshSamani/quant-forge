@@ -89,6 +89,47 @@ class CreditPreflightTests(unittest.TestCase):
         self.assertEqual(report["validation_failures"], ["PREFLIGHT_FAILED"])
         self.assert_safe(report, err)
 
+    def test_scope_diagnostic_is_one_get_sanitized_and_never_relaxes_preflight(self):
+        for case in ("match", "client", "user", "type", "known_noncredit", "active", "suspended", "duplicate", "partial"):
+            _, _, payloads, _ = setup_fixture()
+            row = payloads[0]["result"][0]
+            if case == "client": row["clientId"] = "other-private-id"
+            elif case == "user": row["userId"] = 999
+            elif case == "type": row["type"] = FAKE
+            elif case == "known_noncredit": row["type"] = "spot"
+            elif case == "active": row["isActive"] = False
+            elif case == "suspended": row["isSuspend"] = True
+            elif case == "duplicate":
+                payloads[0]["result"].append(dict(row))
+                payloads[0]["result_info"].update(count=2, total_count=2)
+            elif case == "partial": payloads[0]["result_info"]["total_count"] = 2
+            with self.subTest(case=case):
+                code, report, err, transport, _, _ = invoke(arguments() + ["--diagnose-scope"], payloads)
+                self.assertEqual([r.path for r in transport.calls], ["/sub-accounts"])
+                self.assert_safe(report, err)
+                self.assertNotIn("other-private-id", json.dumps(report))
+                self.assertEqual(code, 0 if case == "match" else 1)
+                self.assertEqual(report["account_type"], "UNVERIFIED")
+                if case == "partial":
+                    self.assertEqual(report["validation_failures"], ["INCOMPLETE_DISCOVERY"])
+                    self.assertNotIn("scope_checks", report)
+                    continue
+                checks = report["scope_checks"]
+                self.assertEqual(checks["client_id_match"],
+                                 "NOT_FOUND" if case == "client" else "MULTIPLE" if case == "duplicate" else "UNIQUE")
+                self.assertEqual(checks["ambiguous_matches"], case == "duplicate")
+                self.assertEqual(checks["duplicate_client_ids"], case == "duplicate")
+                if case not in ("client", "duplicate"):
+                    self.assertEqual(checks["user_id_match"], case != "user")
+                    self.assertEqual(checks["account_type"], "OTHER_OR_UNKNOWN" if case == "type"
+                                     else "spot" if case == "known_noncredit" else "prop")
+                    self.assertEqual(checks["is_active"], case != "active")
+                    self.assertEqual(checks["is_suspended"], case == "suspended")
+                if case in ("client", "user", "type", "known_noncredit", "duplicate"):
+                    normal_code, normal_report, _, _, _, _ = invoke(payloads=payloads)
+                    self.assertEqual(normal_code, 1)
+                    self.assertEqual(normal_report["validation_failures"], ["AMBIGUOUS_SCOPE"])
+
     def test_no_echo_fallback_and_explicit_manual_identity_gate(self):
         def no_hidden_input(*args, **kwargs):
             warnings.warn(FAKE, cli.getpass.GetPassWarning)

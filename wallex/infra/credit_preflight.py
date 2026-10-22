@@ -49,6 +49,8 @@ def _arguments(argv):
     parser = _Arguments(description="Manual Trade Credit GET-only preflight; no trading.")
     parser.add_argument("--connect", action="store_true", required=True,
                         help="Opt in and attest the selected credit account has read access.")
+    parser.add_argument("--diagnose-scope", action="store_true",
+                        help="Read only /sub-accounts and report categorical identity checks.")
     for name in ("sub-account-client-id", "plan-type", "expected-plan-status"):
         parser.add_argument("--" + name, type=_label, required=True)
     for name in ("owner-user-id", "package-id", "user-package-id"):
@@ -110,8 +112,19 @@ def main(argv=None):
             client = CreditReadOnlyClient(transport=UrllibGetTransport(),
                                         resolve_credential=_prompt_credential,
                                         observation_clock=lambda: int(time.time()))
-            result = client.fetch(binding, config=config)
-            if not result.collected:
+            result = client.fetch(binding, config=config, diagnose_scope=args.diagnose_scope)
+            if args.diagnose_scope and result.scope_checks is not None:
+                checks = dict(result.scope_checks)
+                failures = []
+                if (checks["client_id_match"] != "UNIQUE" or checks["user_id_match"] is not True
+                        or checks["account_type"] != "prop" or checks["duplicate_client_ids"]):
+                    failures.append("AMBIGUOUS_SCOPE")
+                if checks["is_active"] is not True or checks["is_suspended"] is not False:
+                    failures.append("INACTIVE_OR_UNVERIFIED_STATUS")
+                report = _summary("DIAGNOSTIC_COMPLETE", failures)
+                report["data_availability"]["accounts"] = "PRESENT"
+                report.update(scope_checks=checks, http_status=result.http_status)
+            elif not result.collected:
                 report = _summary("FAILED", (result.reason.value,))
                 report.update(failed_endpoint=result.failed_endpoint, http_status=result.http_status)
             else:
@@ -122,7 +135,8 @@ def main(argv=None):
     except Exception:
         report = _summary("FAILED", ("PREFLIGHT_FAILED",))
     print(json.dumps(report, sort_keys=True))
-    return 0 if report["connection"] == "CONNECTED" else 1
+    return int(report["connection"] not in ("CONNECTED", "DIAGNOSTIC_COMPLETE")
+               or bool(report["validation_failures"]))
 
 
 if __name__ == "__main__":

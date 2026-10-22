@@ -126,6 +126,7 @@ class CreditReadBundle:
 
 class ReadReason(str, Enum):
     COLLECTED = "COLLECTED"
+    SCOPE_DIAGNOSED = "SCOPE_DIAGNOSED"
     DISABLED = "DISABLED"
     UNVERIFIED_SCOPE = "UNVERIFIED_SCOPE"
     INVALID_CONFIG = "INVALID_CONFIG"
@@ -154,6 +155,7 @@ class CreditReadResult:
     bundle: CreditReadBundle | None = None
     failed_endpoint: str | None = None
     http_status: int | None = None
+    scope_checks: Mapping[str, object] | None = None
     credential_scope_verified: bool = field(default=False, init=False)
     executable_ready: bool = field(default=False, init=False)
     executable_action: Signal = field(default=Signal.NO_TRADE, init=False)
@@ -243,6 +245,34 @@ def _sanitize(payload, path, binding, config):
                                         for currency, row in result.items()}}
 
 
+def _scope_checks(payload, binding, config):
+    """One bounded page, categorical diagnostics only; no account approval."""
+    _require(type(payload) is dict and payload.get("success") is True, ReadReason.INVALID_RESPONSE)
+    rows = payload.get("result")
+    _require(type(rows) is list and len(rows) <= config.max_accounts, ReadReason.INCOMPLETE_DISCOVERY)
+    info = _pick(payload.get("result_info"), ("page", "count", "total_count"))
+    _require(all(_int(v) for v in info.values()) and info["page"] == 1
+             and info["count"] == info["total_count"] == len(rows), ReadReason.INCOMPLETE_DISCOVERY)
+    rows = [_pick(row, ("clientId", "userId", "type", "isActive", "isSuspend")) for row in rows]
+    ids = [row["clientId"] for row in rows]
+    _require(all(_label(value) for value in ids), ReadReason.INVALID_RESPONSE)
+    matches = [row for row in rows if row["clientId"] == binding.sub_account_client_id]
+    selected = matches[0] if len(matches) == 1 else None
+    # Never echo arbitrary provider strings that could contain secrets or IDs.
+    safe_types = ("prop", "spot", "main", "margin", "credit", "trade_credit")
+    account_type = selected["type"] if selected and selected["type"] in safe_types else "OTHER_OR_UNKNOWN"
+    return MappingProxyType({
+        "client_id_match": "UNIQUE" if len(matches) == 1 else "MULTIPLE" if matches else "NOT_FOUND",
+        "user_id_match": (selected["userId"] == binding.owner_user_id
+                          if selected and type(selected["userId"]) is int else None),
+        "account_type": account_type if selected else "UNAVAILABLE",
+        "is_active": selected["isActive"] if selected and type(selected["isActive"]) is bool else None,
+        "is_suspended": selected["isSuspend"] if selected and type(selected["isSuspend"]) is bool else None,
+        "duplicate_client_ids": len(ids) != len(set(ids)),
+        "ambiguous_matches": len(matches) > 1,
+    })
+
+
 class CreditReadOnlyClient:
     def __init__(self, *, transport: GetTransport, resolve_credential: Callable[[str], str],
                  observation_clock: Callable[[], int]):
@@ -250,16 +280,19 @@ class CreditReadOnlyClient:
         self._resolve = resolve_credential
         self._clock = observation_clock
 
-    def fetch(self, binding: CreditAccountBinding, *, config: ReadOnlyConfig) -> CreditReadResult:
+    def fetch(self, binding: CreditAccountBinding, *, config: ReadOnlyConfig,
+              diagnose_scope: bool = False) -> CreditReadResult:
         """Collect exactly three whitelisted GETs or return no usable bundle.
 
         Only explicit future opt-in and owner-attested matching read scope permit
         resolver/transport use. These declarations never verify actual key scope.
         All failures discard partial evidence; there are no retries or fallbacks.
+        diagnose_scope stops after discovery with checks only, never a bundle.
         """
         endpoint = None
         try:
-            _require(type(config) is ReadOnlyConfig, ReadReason.INVALID_CONFIG)
+            _require(type(config) is ReadOnlyConfig and type(diagnose_scope) is bool,
+                     ReadReason.INVALID_CONFIG)
             _require(config.opt_in is True, ReadReason.DISABLED)
             _require(type(binding) is CreditAccountBinding and binding.kind is AccountKind.TRADE_CREDIT
                      and _label(binding.sub_account_client_id) and _int(binding.owner_user_id)
@@ -279,7 +312,7 @@ class CreditReadOnlyClient:
             _require(_label(secret), ReadReason.CREDENTIAL_UNAVAILABLE)
             reads = []
             previous = None
-            for endpoint in GET_PATHS:
+            for endpoint in (GET_PATHS[:1] if diagnose_scope else GET_PATHS):
                 request = HttpGet(endpoint, MappingProxyType({
                     "x-api-key": secret, "sub-account-client-id": binding.sub_account_client_id,
                 }), config.timeout_seconds, config.max_response_bytes)
@@ -307,6 +340,11 @@ class CreditReadOnlyClient:
                 try:
                     payload = json.loads(reply.body.decode("utf-8"), parse_float=Decimal,
                                          parse_constant=_constant, object_pairs_hook=_unique)
+                    if diagnose_scope:
+                        checks = _scope_checks(payload, binding, config)
+                        _require(not _contains(dict(checks), secret), ReadReason.SENSITIVE_RESPONSE)
+                        return CreditReadResult(False, ReadReason.SCOPE_DIAGNOSED,
+                                                http_status=200, scope_checks=checks)
                     sanitized = _sanitize(payload, endpoint, binding, config)
                     _require(not _contains(sanitized, secret), ReadReason.SENSITIVE_RESPONSE)
                     encoded = json.dumps(sanitized, ensure_ascii=False, allow_nan=False, sort_keys=True)
