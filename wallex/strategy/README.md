@@ -271,6 +271,104 @@ TradeIntent, order, agent decision, risk approval, or live execution. Existing
 engine, indicator, trend, pullback, risk, infra, audit, and execution code is
 unchanged.
 
+## Provisional MarketFrame diagnostics
+
+`wallex.strategy.frame_adapter.assess_market_frame(frame=None, *, pe=None)` is a
+Strategy-owned, read-only local adapter for **market-frame-proposal-v0**. It does
+not import `wallex.market`, which is currently available only on the teammate
+Market feature stack. No teammate branch needs to be merged to import or test
+this adapter. This interface is provisional and is not an approved shared schema.
+
+The input is a passive attribute record with the following boundary. Methods,
+provider payloads, dictionaries, lazy/live readers, and concurrent mutation are
+outside the interface; obtain a stable snapshot upstream. The adapter never
+assigns to source objects. Ordinary attribute/validation failures reject the
+frame without exposing foreign exception text. This is not a sandbox for objects
+with active properties.
+
+| Required attributes | Local meaning |
+| --- | --- |
+| `schema_version` | Exact string `market-frame-proposal-v0`; all other versions reject. |
+| `symbol`, `base_asset`, `quote_asset` | Explicit nonempty strings without whitespace/control characters; distinct assets. Case/units are preserved, not inferred from the symbol. |
+| `as_of` | Nonnegative integer UTC Unix-second decision cutoff, excluding bool. |
+| `candles_15m`, `candles_1h` | Tuples of normalized candle-like attribute records. |
+| `dataset_sha256_15m`, `dataset_sha256_1h` | Separate lowercase 64-character hexadecimal file-byte hash claims. |
+| `data_quality`, `quality_reasons` | `INCOMPLETE` and the five v0 quality reasons, as strings or Enum members with string values; reasons must be a tuple. |
+| `event_time`, `received_time`, `best_bid`, `best_ask`, `spread_pct`, `snapshot_hash` | Required and explicitly `None` for this version. |
+| `depth_valid` | Required and exactly `False`. |
+
+Each candle must expose `symbol`, `timeframe`, `timestamp`, `open`, `high`, `low`,
+`close`, `volume`, and `completed`. Its symbol must match the frame. Timeframe is
+an Enum with name `M15`/`H1` and exact integer value 900/3600 for the corresponding
+history; raw strings/interval numbers are not coerced. OHLC must already be
+positive finite Decimals, volume a nonnegative finite Decimal in **base-asset
+units**, and completion exactly `True`. Timestamps are normalized UTC Unix-second
+**open** times, even if the source dataset used milliseconds. No second unit
+conversion takes place.
+
+Projection creates existing Strategy `Candle` records without rounding or float
+conversion. It validates OHLC, open-time grid, chronological order, continuity,
+and `open + interval <= as_of` using the existing validator. Both histories are
+fully validated before any technical assessment is run. At least 21 M15 and
+250 H1 completed candles are required, and each latest close must equal:
+
+```text
+expected_latest_close = (as_of // interval) * interval
+```
+
+Thus at an intermediate M15 cutoff the H1 assessment uses the previous completed
+hour. The same frame cutoff is passed to the unchanged `assess_hourly_trend`,
+`assess_pullback`, and, when requested, `assess_initial_stop`. Nothing is sorted,
+filtered, resampled, forward-filled, or invented. No wall clock is consulted.
+Freshness here is relative to the supplied cutoff, not proof of present-time
+quote or book freshness.
+
+The frozen `FrameDiagnostics` contains `frame_valid`, local reason codes,
+optional `FrameMetadata`, Trend/Pullback assessments, optional StopAssessment,
+`technical_eligible`, and a safe rejection location. Metadata preserves identity,
+cutoff/schema, both dataset digest claims, all quality reasons and unavailable
+market fields. Each frozen `HistoryDiagnostics` retains the exact projected
+candles, matching symbol, explicit Strategy timeframe, and aligned
+`volumes_base[i]` for `candles[i]`. This keeps volume and provenance outside the
+smaller indicator Candle interface rather than silently discarding them.
+
+`frame_valid=True` means only local validation succeeded. `technical_eligible`
+means **Trend AND Pullback** passed; it is independent of optional Pe/stop validity.
+For invalid/unsupported frames the result has no metadata, candles, or assessment
+evidence, `technical_eligible=False`, and an explicit rejection reason. Technical
+condition failures on valid histories retain their actual diagnostic evidence.
+All results have fixed `executable_action=Signal.NO_TRADE` and
+`executable_ready=False`; neither can be enabled through constructor arguments.
+The existing `engine.evaluate()` is unchanged and continues to return NO_TRADE.
+
+Optional `pe` is the caller's **provisional maximum permitted BUY price**, supplied
+as a positive finite Decimal. It is never derived from candle close or missing
+Quote data. Absent Pe reports `PE_UNAVAILABLE` without calculating stops; invalid
+Pe reports `PE_INVALID` and also skips stops. Valid numeric Pe reports
+`PE_PROVISIONAL` and permits only a proposed stop calculation. If stop validation
+fails, `STOP_INVALID` accompanies the unchanged fail-closed StopAssessment with
+no usable levels. A mathematically valid stop does not approve Pe provenance,
+freshness, instrument/tick rules, or fee/slippage assumptions. Risk sizing must
+use the independently approved Pe and applicable costs.
+
+The v0 deficiencies always block executable readiness: incomplete quality,
+unavailable Quote/Depth, unknown frame event/received times, missing canonical
+snapshot hash, and unapproved shared schema. Contradictory claims such as a
+populated Quote or `depth_valid=True` reject this version instead of silently
+upgrading it. Its five quality reasons are preserved: `QUOTE_UNAVAILABLE`,
+`DEPTH_UNAVAILABLE`, `FRAME_TIME_SEMANTICS_PENDING`,
+`SNAPSHOT_HASH_POLICY_PENDING`, and `SHARED_SCHEMA_PENDING`.
+
+Dataset digests are format-validated producer claims, not verified authenticity
+or a canonical frame hash; the adapter has no source bytes. No instrument registry
+or symbol-to-assets mapping, cross-timeframe aggregation check, Quote/Book freshness
+policy, cost approval, account balance, sizing, or reservation is supplied here.
+Market owns normalization, datasets, and the proposal; Strategy owns only this
+consumer projection and diagnostics. Shared schema/time/provenance/market-rule
+agreement, CandidateSignal/AgentDecision contracts, complete risk authorization,
+and execution integration remain pending. No CandidateSignal, TradeIntent, order,
+agent/risk approval, external request, or live action is produced.
+
 ## Limitations and planned integration
 
 The shared **MarketFrame contract is pending**. Market owners must confirm
