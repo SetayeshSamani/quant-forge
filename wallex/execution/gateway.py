@@ -6,7 +6,9 @@ from wallex.audit.ledger import Ledger, ObservationError
 from wallex.risk import RiskReason
 from wallex.strategy import Signal, StrategyDecision
 
-from .models import ContractError, ExecutionReceipt, ExecutionRequest, Mode, OrderState, json_value, utc
+from .models import (
+    ContractError, ExecutionReceipt, ExecutionRequest, Mode, OrderObservation, OrderState, json_value, utc,
+)
 from .replay import ReplayTransport
 
 
@@ -57,6 +59,13 @@ class ReplayGateway:
             self.ledger.observe(record.request.intent.intent_id, observation,
                                 expected_version=record.version, at=self._now())
         except (ObservationError, ContractError, ValueError, TypeError):
+            intent = record.request.intent
+            self.ledger.record_event("source_observation_unusable", account_id=intent.account_id,
+                                     run_id=intent.run_id, trace_id=intent.trace_id, at=self._now(),
+                                     intent_id=intent.intent_id, payload={
+                                         "observation": observation if isinstance(observation, OrderObservation) else None,
+                                         "reason": "invalid_or_incomplete_source_evidence",
+                                     })
             return self._uncertain(record, "invalid_or_incomplete_source_evidence")
         # Storage failures propagate: the last committed control state remains
         # recoverable. Never repeat transport I/O to recover an audit commit.

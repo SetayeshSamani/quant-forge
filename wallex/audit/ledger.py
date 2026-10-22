@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 
 from wallex.execution.models import (
-    ContractError, ExecutionReceipt, ExecutionRequest, Mode, OrderObservation, OrderState,
+    ContractError, ExecutionReceipt, ExecutionRequest, Fill, Mode, OrderObservation, OrderState, Side,
     canonical_json, decimal_text,
     exact_sum, identifier, json_value, utc,
 )
@@ -259,6 +259,48 @@ class Ledger:
                          "AND kind='order_observed' ORDER BY event_seq DESC LIMIT 1", (intent_id,)).fetchone()
         return OrderObservation.from_dict(json.loads(row[0])["observation"]) if row else None
 
+    @staticmethod
+    def _fills(db, intent_id: str) -> tuple[Fill, ...]:
+        return tuple(Fill.from_dict(json.loads(row[0])) for row in db.execute(
+            "SELECT payload_json FROM fills WHERE intent_id=? ORDER BY source,fill_id", (intent_id,)
+        ))
+
+    def fills(self, intent_id: str) -> tuple[Fill, ...]:
+        with self._transaction() as db:
+            return self._fills(db, identifier(intent_id))
+
+    def _merge_fills(self, db, record: IntentRecord, observation: OrderObservation, at: datetime):
+        intent = record.request.intent
+        for fill in observation.fills:
+            if (fill.account_id, fill.client_id, fill.symbol, fill.base_asset, fill.quote_asset,
+                    fill.source_order_id, fill.source) != (
+                    intent.account_id, intent.client_id, intent.symbol, intent.base_asset, intent.quote_asset,
+                    observation.source_order_id, observation.source):
+                raise ObservationError("Fill identity or units do not match this order/source.")
+            if intent.side == Side.BUY and fill.price_quote_per_base > intent.price_quote_per_base:
+                raise ObservationError("Fill price violates the persisted buy limit.")
+            if fill.fee_asset == intent.base_asset and fill.fee_amount > fill.quantity_base:
+                raise ObservationError("Base fee exceeds this fixture's acquired fill quantity.")
+            row = db.execute("SELECT intent_id,payload_json FROM fills WHERE account_id=? AND source=? AND fill_id=?",
+                             (intent.account_id, fill.source, fill.fill_id)).fetchone()
+            encoded = json_value(fill)
+            if row is not None:
+                previous = json.loads(row["payload_json"])
+                # Delivery time may change when the same stable economic event
+                # is redelivered. Preserve the first receipt and never recount it.
+                previous.pop("received_at")
+                incoming = {key: value for key, value in encoded.items() if key != "received_at"}
+                if row["intent_id"] != intent.intent_id or previous != incoming:
+                    raise ObservationError("Stable Fill identity was reused with conflicting content.")
+                continue
+            db.execute("INSERT INTO fills(account_id,source,fill_id,intent_id,payload_json) VALUES (?,?,?,?,?)",
+                       (intent.account_id, fill.source, fill.fill_id, intent.intent_id, canonical_json(fill)))
+            self._event(db, "fill_recorded", account_id=intent.account_id, run_id=intent.run_id,
+                        trace_id=intent.trace_id, at=at, intent_id=intent.intent_id, payload={"fill": fill})
+        quantity = exact_sum(fill.quantity_base for fill in self._fills(db, intent.intent_id))
+        if quantity != observation.cumulative_filled_quantity:
+            raise ObservationError("Cumulative quantity lacks complete, deduplicated Fill evidence.")
+
     def observe(self, intent_id: str, observation: OrderObservation, *, expected_version: int,
                 at: datetime) -> IntentRecord:
         if not isinstance(observation, OrderObservation):
@@ -288,11 +330,16 @@ class Ledger:
                     raise ObservationError("Conflicting evidence after rejection requires manual review.")
                 if observation.cumulative_filled_quantity < previous.cumulative_filled_quantity:
                     raise ObservationError("Cumulative fill quantity cannot decrease.")
-            # Nonzero/fill support is introduced by the next coherent change.
-            if observation.fills or observation.cumulative_filled_quantity != 0:
-                raise ObservationError("Fill reconciliation is not implemented by this checkpoint.")
-            if observation.state not in {OrderState.WORKING, OrderState.CANCELED, OrderState.REJECTED}:
-                raise ObservationError("Receipt state needs complete fill evidence.")
+            quantity = observation.cumulative_filled_quantity
+            if quantity > intent.quantity_base:
+                raise ObservationError("Cumulative quantity exceeds the persisted order quantity.")
+            if observation.state in {OrderState.WORKING, OrderState.REJECTED} and quantity != 0:
+                raise ObservationError("Working/rejected receipt contradicts nonzero fills.")
+            if observation.state == OrderState.PARTIAL and not 0 < quantity < intent.quantity_base:
+                raise ObservationError("Partial receipt must have a strict partial fill quantity.")
+            if observation.state == OrderState.FILLED and quantity != intent.quantity_base:
+                raise ObservationError("Filled receipt must cover the complete order quantity.")
+            self._merge_fills(db, record, observation, at)
             db.execute("UPDATE intents SET state=?,version=version+1,source_order_id=?,"
                        "reported_filled_quantity=?,uncertainty_reason=NULL,last_observed_at=? WHERE intent_id=?",
                        (observation.state.value, observation.source_order_id,
@@ -311,18 +358,27 @@ class Ledger:
             record = self._record(row)
             intent = record.request.intent
             observation = self._last_observation(db, intent_id)
+            fills = self._fills(db, intent_id)
             unresolved = record.state in {OrderState.PLANNED, OrderState.SUBMITTING, OrderState.UNKNOWN,
                                          OrderState.RECONCILING, OrderState.CANCEL_PENDING}
             filled = None if unresolved else record.reported_filled_quantity
             remaining = (exact_sum((intent.quantity_base, filled.copy_negate()))
                          if filled is not None else None)
+            net, net_reason = None, "order_outcome_or_fill_evidence_unknown"
+            if filled is not None and intent.side == Side.BUY:
+                if any(fill.fee_amount is None for fill in fills):
+                    net_reason = "one_or_more_fill_fees_unknown"
+                else:
+                    net = exact_sum([fill.quantity_base for fill in fills] + [
+                        fill.fee_amount.copy_negate() for fill in fills if fill.fee_asset == intent.base_asset
+                    ])
+                    net_reason = None
             return ExecutionReceipt(intent.intent_id, intent.client_id, intent.account_id, intent.symbol,
                                     intent.mode, record.state, intent.run_id, intent.trace_id,
                                     record.request.fingerprint, record.request.references,
                                     intent.base_asset, intent.quote_asset, intent.quantity_base,
-                                    filled, remaining, observation, (), record.request.reservation,
-                                    record.reservation_held, record.uncertainty_reason, None,
-                                    "fill_accounting_not_yet_available")
+                                    filled, remaining, observation, fills, record.request.reservation,
+                                    record.reservation_held, record.uncertainty_reason, net, net_reason)
 
     def events(self, intent_id: str | None = None) -> tuple[AuditEvent, ...]:
         with self._transaction() as db:
