@@ -71,6 +71,10 @@ def tp1_decision(frame, *, pe: Decimal | None = None,
     if assessment is None:
         assessment = assess_market_frame(frame, pe=risk.pe if risk is not None else pe)
     risk_details = {
+        "technical_evidence": {
+            "as_of": assessment.metadata.as_of if assessment.metadata is not None else None,
+            "trend": assessment.trend, "pullback": assessment.pullback, "stop": assessment.stop,
+        },
         "input_reasons": issues, "context_reasons": context,
         "risk_reasons": assessed_risk.reasons,
         "credit_reasons": diagnostics.credit.reasons,

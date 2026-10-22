@@ -19,6 +19,7 @@ from wallex.risk.pipeline import PipelineInputs
 from wallex.risk.portfolio_guards import PortfolioGuardState
 from wallex.risk.sizing import RiskProfile
 from .tp1 import run_tp1_shadow
+from .research import evaluate_candidates
 
 # Demo assumptions only: independent budgets, never projections of wallet/debt.
 SYNTHETIC_EQUITY = Decimal("10000")
@@ -128,6 +129,7 @@ def run_demo():
             "blocked": sum(bool(row["blocking_reasons"]) for row in rows), "executable_ready": False,
             "blocking_reason_counts": dict(Counter(reason for row in rows for reason in row["blocking_reasons"])),
         },
+        "research": evaluate_candidates(result),
         "steps": rows,
     }
 
