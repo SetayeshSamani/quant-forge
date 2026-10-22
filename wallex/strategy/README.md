@@ -369,6 +369,57 @@ agreement, CandidateSignal/AgentDecision contracts, complete risk authorization,
 and execution integration remain pending. No CandidateSignal, TradeIntent, order,
 agent/risk approval, external request, or live action is produced.
 
+## Explicit MarketFrame v1 diagnostic consumer
+
+The same `assess_market_frame(frame, pe=...)` entry point also accepts real
+`wallex.market.frame_v1.MarketFrameV1` objects labelled `marketframe-v1`.
+The Market import is lazy and used only for explicitly labelled v1 inputs;
+the v0 passive interface, validation, reasons and missing-data behavior remain
+unchanged. Trend, Pullback, Stop and Risk calculations are unchanged.
+
+V1 is checked using Market's existing `verify_snapshot_hash`,
+`build_market_frame_v1` and `canonical_frame_json` helpers. The supplied hash
+must verify, and the supplied fields must match a fresh validated canonical
+reconstruction, including identity, cutoff, histories, availability, aggregate
+times, sources, policy, Quote/Depth, quality and draft status. A recomputed hash
+alone cannot make inconsistent derived fields valid. Hash integrity does not
+prove source authenticity or approval. No hashing/normalization policy is
+reimplemented in Strategy.
+
+This initial v1 consumer requires `QualityV1.COMPLETE` and no quality reasons.
+Missing/stale receipt evidence, stale histories, unavailable/invalid Quote or
+Depth, incomplete quality, mismatched identity/timeframe, or inconsistent/hash-
+tampered snapshots reject the frame before any technical assessment. V1's
+builder can produce INCOMPLETE diagnostic frames, but this consumer does not
+admit them; the existing v0 diagnostic behavior stays intact. Freshness thresholds
+are explicit producer-policy claims, not newly approved Strategy/live defaults.
+
+`AvailableCandle.candle` is projected into existing Strategy candles without
+float conversion, rounding, invented prices or dataset hashes. Each v1
+`HistoryDiagnostics.dataset_sha256` is explicitly `None`: v1's canonical snapshot
+hash is not a dataset-file digest. `FrameMetadata.v1_evidence` preserves a rebuilt
+immutable v1 record with every per-candle receipt time/source, source list,
+policy, nested Quote, Depth levels and quality evidence. Top-level metadata also
+preserves actual event/received times, bid/ask, spread, depth validity and hash.
+V0 metadata keeps `v1_evidence=None` and its original dataset digest claims.
+
+The existing Risk pipeline consumes these diagnostics without new wiring or
+changing any Risk module. Explicit Pe is never inferred from candle close or ask
+price. Its source/freshness and cost/account evidence remain caller obligations;
+only the unchanged local diagnostic conditions can yield theoretical sizing.
+
+**COMPLETE is data quality only; `contract_status=DRAFT` stays unapproved.**
+Adapter and pipeline outputs permanently retain `executable_action=NO_TRADE`
+and `executable_ready=False`. No Gate activation, RiskDecision authorization,
+TradeIntent, execution request, account selection or credit-account assumption
+is introduced. Authentic provenance, approved shared schemas, instrument/cost
+rules, account correlation and atomic admission remain unresolved.
+
+```text
+python -B -m unittest wallex.strategy.test_frame_adapter_v1 -q
+python -B -m unittest discover -s wallex -p "test_*.py" -q
+```
+
 ## Limitations and planned integration
 
 The shared **MarketFrame contract is pending**. Market owners must confirm
