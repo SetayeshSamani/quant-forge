@@ -468,7 +468,7 @@ no-data, truncation or different actual spacing fail closed; no protocol fallbac
 or unit conversion is guessed. Dates are explicit whole UTC hours, start inclusive
 and end exclusive, at most 14 days, entirely closed at collection time.
 
-Only public GET `/v1/udf/history` with `symbol/resolution=1/from/to` is used. Actual
+The default M1 path uses public GET `/v1/udf/history` with `symbol/resolution=1/from/to`. Actual
 60-second spacing and exact range coverage are checked; `resolution=15` is never
 trusted or requested. Complete M1 groups produce M15 and H1 using first open,
 maximum high, minimum low, final close and exact volume sums. Existing normalizers
@@ -493,3 +493,42 @@ provisional maximum BUY price; absent Pe leaves stop validity unknown. Candidate
 counts and technical rejection reasons are reported with permanent NO_TRADE,
 no executable quantities, approval, exits or profitability claims. Public wire,
 timestamp/volume semantics and actual historical results await owner validation.
+
+
+## Native H1 ingestion (independent of M1)
+
+Use the existing public-only collector with an explicit native H1 flag:
+
+```powershell
+python -B -m wallex.market.history --fetch --native-h1 --symbol BTCUSDT --base BTC --quote USDT --start 2026-10-10T00:00Z --end 2026-10-21T00:00Z --volume-unit base --output "$env:TEMP\qf-native-h1"
+```
+
+`--volume-unit base` is an explicit **caller assumption**, not independent
+verification. Provider volume units remain unverified; the native manifest records
+`volume_semantics=CALLER_ATTESTED_BASE` and `volume_unit_verification=UNVERIFIED`.
+No conversion or multiplication of native volume occurs. The command is shown
+for a caller who explicitly accepts that provisional assumption; it does not
+establish units suitable for trading or risk authorization.
+
+Requests use public GET `/v1/udf/history` with `resolution=60`. Actual timestamps
+must match every UTC hourly open in `[start, end)` exactly; `end` is exclusive and
+all candles must be closed by the observed cutoff. Missing, duplicate, unordered,
+misaligned, extra, partial, inconsistent OHLCV and nonfinite data fail closed.
+The existing normalizer and JSONL loader validate native H1 directly. No M1
+fallback, synthetic bars, sorting, filling or gap-aware M15 reconstruction occurs.
+The original strict M1-to-M15/H1 path remains the default and still rejects gaps.
+
+Output is only `h1.jsonl`, exact raw bodies and `manifest.json` in a new directory
+outside the repository. Native provenance records resolution `60`, spacing `3600`,
+`ingestion=NATIVE_H1`, `aggregation=NONE`, request ranges, receipt timestamps,
+byte counts and raw/dataset SHA-256 hashes. Existing request/time/size bounds and
+INCOMPLETE failure manifests apply. Never commit downloaded data.
+
+Owner-provided independent QA reported 264 consecutive H1 candles for October
+10?21, 2026, and one matching native/M1-aggregate hour on October 20, 12:00?13:00
+UTC. Three M1 gaps elsewhere remain unresolved. Those observations are supplied
+QA evidence, not a live verification performed by this implementation. Tests use
+synthetic injected responses only. Native H1 collection does not supply M15 and
+is deliberately not accepted by the existing combined-history research command.
+Contiguous-window research and M15 gap handling are separate future tasks.
+No Strategy, Risk, Execution, account or trading behavior is changed.

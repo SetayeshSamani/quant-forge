@@ -1,8 +1,8 @@
-"""Explicit opt-in public UDF history; complete M1 aggregation, offline research.
+"""Opt-in public UDF history; strict M1 aggregation or independent native H1.
 
 No import-time HTTP, credentials, account endpoints or write requests. Wire t is
 accepted only as UTC open seconds; v requires caller-attested base volume. Actual
-provider semantics remain unverified until an owner-run public fetch/review.
+provider volume units remain independently unverified; an assumption is not verification.
 """
 
 import argparse
@@ -71,6 +71,23 @@ def _reject_constant(value):
 
 
 def decode_minutes(payload, *, symbol, start, end):
+    return _decode_candles(payload, symbol=symbol, start=start, end=end, timeframe=Timeframe.M1)
+
+
+def decode_hours(payload, *, symbol, start, end, as_of):
+    """Validate native H1 opens in [start, end), closed by explicit UTC as_of.
+
+    Actual timestamps, not the requested resolution, establish hourly spacing.
+    No sorting, truncation, gap filling, aggregation or volume conversion occurs.
+    """
+    if (any(type(value) is not int for value in (start, end, as_of))
+            or not 0 <= start < end <= as_of or start % 3600 or end % 3600
+            or end - start > 14 * 86400):
+        raise ValueError("INVALID_NATIVE_H1_RANGE_OR_CUTOFF")
+    return _decode_candles(payload, symbol=symbol, start=start, end=end, timeframe=Timeframe.H1)
+
+
+def _decode_candles(payload, *, symbol, start, end, timeframe):
     if type(payload) is not bytes or len(payload) > MAX_BYTES:
         raise ValueError("INVALID_RESPONSE_SIZE")
     data = json.loads(payload.decode("utf-8"), parse_float=Decimal,
@@ -80,17 +97,17 @@ def decode_minutes(payload, *, symbol, start, end):
     keys = ("t", "o", "h", "l", "c", "v")
     if any(type(data.get(key)) is not list for key in keys):
         raise ValueError("UDF_ARRAYS_REQUIRED")
-    if (any(len(data[key]) != (end - start) // 60 for key in keys)
+    if (any(len(data[key]) != (end - start) // timeframe.value for key in keys)
             or any(type(stamp) is not int for stamp in data["t"])
-            or data["t"] != list(range(start, end, 60))):
-        raise ValueError("M1_COVERAGE_OR_SPACING_INVALID")
+            or data["t"] != list(range(start, end, timeframe.value))):
+        raise ValueError(f"{timeframe.name}_COVERAGE_OR_SPACING_INVALID")
     if "symbol" in data and data["symbol"] != symbol:
         raise ValueError("SYMBOL_MISMATCH")
     if "completed" in data and (type(data["completed"]) is not list
             or len(data["completed"]) != len(data["t"]) or any(value is not True for value in data["completed"])):
         raise ValueError("INCOMPLETE_SOURCE_CANDLE")
     rows = [dict(zip(FIELDS, values + (True,))) for values in zip(*(data[key] for key in keys))]
-    candles = normalize_candles(rows, symbol=symbol, timeframe=Timeframe.M1,
+    candles = normalize_candles(rows, symbol=symbol, timeframe=timeframe,
                                 timestamp_unit=TimestampUnit.SECONDS, as_of=end)
     for candle in candles:
         for field in ("open", "high", "low", "close", "volume"):
@@ -147,11 +164,14 @@ def _validate_request(config, now):
 
 
 def collect_history(config, *, fetch=False, transport=public_get,
-                    clock=lambda: int(time.time()), evidence_kind=EvidenceKind.HISTORICAL_DATA):
+                    clock=lambda: int(time.time()), evidence_kind=EvidenceKind.HISTORICAL_DATA, native_h1=False):
     if fetch is not True:
         raise ValueError("EXPLICIT_FETCH_REQUIRED")
     if type(evidence_kind) is not EvidenceKind:
         raise ValueError("EXPLICIT_EVIDENCE_KIND_REQUIRED")
+    if type(native_h1) is not bool:
+        raise ValueError("EXPLICIT_SOURCE_MODE_REQUIRED")
+    resolution, spacing = ("60", 3600) if native_h1 else ("1", 60)
     observed = clock()
     output = _validate_request(config, observed)
     output.mkdir(parents=True, exist_ok=False)
@@ -159,14 +179,16 @@ def collect_history(config, *, fetch=False, transport=public_get,
     manifest = {"status": "INCOMPLETE", "endpoint": ENDPOINT, "symbol": config.symbol,
                 "base_asset": config.base_asset, "quote_asset": config.quote_asset,
                 "start": config.start, "end": config.end, "evidence_kind": evidence_kind.value,
-                "source_resolution_requested": "1", "source_spacing_seconds": 60,
+                "source_resolution_requested": resolution, "source_spacing_seconds": spacing,
                 "timestamp_semantics": "UTC_OPEN_SECONDS", "volume_semantics": "CALLER_ATTESTED_BASE",
-                "aggregation": "COMPLETE_UTC_M1_TO_M15_AND_H1", "requests": [], "datasets": {}}
-    minutes = []
+                "aggregation": "NONE" if native_h1 else "COMPLETE_UTC_M1_TO_M15_AND_H1", "requests": [], "datasets": {}}
+    if native_h1:
+        manifest.update(ingestion="NATIVE_H1", volume_unit_verification="UNVERIFIED")
+    source_candles = []
     try:
         for index, start in enumerate(range(config.start, config.end, config.chunk_hours * 3600)):
             end = min(start + config.chunk_hours * 3600, config.end)
-            url = ENDPOINT + "?" + urlencode(dict(symbol=config.symbol, resolution="1", **{"from": start, "to": end - 1}))
+            url = ENDPOINT + "?" + urlencode(dict(symbol=config.symbol, resolution=resolution, **{"from": start, "to": end - 1}))
             payload = transport(url, timeout_seconds=config.timeout_seconds)
             received = clock()
             if type(received) is not int or received < observed:
@@ -178,9 +200,13 @@ def collect_history(config, *, fetch=False, transport=public_get,
             (output / name).write_bytes(payload)
             manifest["requests"].append(dict(file=name, url=url, observed_at=received,
                                              sha256=sha256(payload).hexdigest(), byte_count=len(payload)))
-            minutes.extend(decode_minutes(payload, symbol=config.symbol, start=start, end=end))
-        for timeframe, name in ((Timeframe.M15, "m15.jsonl"), (Timeframe.H1, "h1.jsonl")):
-            candles = aggregate_minutes(minutes, symbol=config.symbol, timeframe=timeframe, as_of=config.end)
+            if native_h1:
+                source_candles.extend(decode_hours(payload, symbol=config.symbol, start=start, end=end, as_of=received))
+            else:
+                source_candles.extend(decode_minutes(payload, symbol=config.symbol, start=start, end=end))
+        outputs = ((Timeframe.H1, "h1.jsonl"),) if native_h1 else ((Timeframe.M15, "m15.jsonl"), (Timeframe.H1, "h1.jsonl"))
+        for timeframe, name in outputs:
+            candles = source_candles if native_h1 else aggregate_minutes(source_candles, symbol=config.symbol, timeframe=timeframe, as_of=config.end)
             text = "".join(canonical_json({field: getattr(candle, field) for field in FIELDS}) + "\n" for candle in candles)
             (output / name).write_text(text, encoding="utf-8", newline="\n")
             dataset = load_dataset(output / name, symbol=config.symbol, timeframe=timeframe,
@@ -267,16 +293,19 @@ def main(argv=None):
     for field in ("start", "end", "decision-start", "decision-end"):
         parser.add_argument("--" + field, type=utc_hour)
     parser.add_argument("--volume-unit", choices=("base",), help="Attest provider v is base volume; never guessed/converted")
+    parser.add_argument("--native-h1", action="store_true", help="Fetch native resolution=60 H1 only; no M15 or research output")
     parser.add_argument("--chunk-hours", type=int, default=4)
     parser.add_argument("--max-requests", type=int, default=96)
     parser.add_argument("--pe", type=Decimal, help="Explicit provisional maximum BUY price; never inferred")
     args = parser.parse_args(argv)
+    if args.native_h1 and not args.fetch:
+        parser.error("--native-h1 requires --fetch")
     try:
         if args.fetch:
             if any(getattr(args, key) is None for key in ("symbol", "base", "quote", "start", "end", "output", "volume_unit")):
                 parser.error("fetch requires symbol/base/quote/start/end/output/volume-unit")
             result = collect_history(HistoryRequest(args.symbol, args.base, args.quote, args.start, args.end,
-                                     Path(args.output), args.volume_unit, args.chunk_hours, args.max_requests), fetch=True)
+                                     Path(args.output), args.volume_unit, args.chunk_hours, args.max_requests), fetch=True, native_h1=args.native_h1)
         else:
             if args.input is None:
                 parser.error("research requires input directory")
