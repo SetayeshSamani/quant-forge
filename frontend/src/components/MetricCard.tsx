@@ -10,7 +10,7 @@ export function MetricCard({
   value: string;
   icon: IconName;
   tone?: "blue" | "green" | "gold";
-  graphic: "spark" | "bars" | "progress";
+  graphic?: "spark" | "bars" | "progress";
 }) {
   return (
     <article

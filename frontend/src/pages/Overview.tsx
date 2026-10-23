@@ -14,7 +14,7 @@ export function Overview({ onReviewRisk }: { onReviewRisk: () => void }) {
       </div>
       <div className="risk-banner" role="status">
         <Icon name="alert" />
-        <strong>ریسک لیکویید قابل ارزیابی نیست</strong>
+        <strong>ریسک لیکوییدشدن قابل ارزیابی نیست</strong>
         <span className="banner-divider" />
         <span>داده اعتبار ناقص است؛ ورود جدید مسدود است.</span>
         <button onClick={onReviewRisk}>بررسی ریسک</button>
@@ -73,7 +73,7 @@ export function Overview({ onReviewRisk }: { onReviewRisk: () => void }) {
                 <dd>{DEMO.planDays} روز</dd>
               </div>
               <div>
-                <dt>آستانه لیکویید</dt>
+                <dt>آستانه لیکوییدشدن</dt>
                 <dd>
                   تأیید نشده <Icon name="info" size={15} />
                 </dd>

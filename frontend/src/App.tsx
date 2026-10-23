@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { AppShell, type Theme, type PageId } from "./components/AppShell";
+import {
+  AppShell,
+  PAGE_TITLES,
+  type Theme,
+  type PageId,
+} from "./components/AppShell";
 import { Icon } from "./components/Icon";
 import { Overview } from "./pages/Overview";
 import { DecisionCenter } from "./pages/DecisionCenter";
+import { CreditRisk } from "./pages/CreditRisk";
 
-const pageFromHash = (): PageId =>
-  window.location.hash === "#decision-center" ? "decision-center" : "overview";
+const pageFromHash = (): PageId => {
+  const hash = window.location.hash.slice(1);
+  return hash === "credit-risk" || hash === "decision-center"
+    ? hash
+    : "overview";
+};
 export function App() {
   const [page, setPage] = useState<PageId>(pageFromHash);
   useEffect(() => {
@@ -14,7 +24,7 @@ export function App() {
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
   useEffect(() => {
-    document.title = `${page === "decision-center" ? "مرکز تصمیم" : "نمای کلی"} | QuantForge DEMO`;
+    document.title = `${PAGE_TITLES[page]} | QuantForge DEMO`;
   }, [page]);
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.dataset.theme === "light" ? "light" : "dark",
@@ -64,7 +74,9 @@ export function App() {
         setSidebarOpen={setSidebarOpen}
         onNotifications={() => showNotice("notifications")}
       >
-        {page === "decision-center" ? (
+        {page === "credit-risk" ? (
+          <CreditRisk />
+        ) : page === "decision-center" ? (
           <DecisionCenter />
         ) : (
           <Overview onReviewRisk={() => showNotice("risk")} />

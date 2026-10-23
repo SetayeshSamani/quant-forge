@@ -1,0 +1,617 @@
+/* Approved Credit & Risk layout; all colors inherit the existing themes. */
+.credit-risk-page {
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.credit-risk-page .risk-banner {
+  padding-inline: 18px;
+}
+.credit-risk-page .risk-banner > strong {
+  font-size: 17px;
+}
+.credit-metric {
+  position: relative;
+  min-width: 0;
+}
+.credit-metric .metric-card {
+  height: 122px;
+}
+.credit-metric .metric-copy > strong {
+  font-size: 32px;
+}
+.credit-metric .metric-label {
+  font-size: 14px;
+}
+.credit-metric-status {
+  position: absolute;
+  right: 13px;
+  bottom: 12px;
+}
+.credit-metric-status .badge {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+.credit-main-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 0.94fr 0.99fr 1.07fr;
+  gap: 12px;
+  direction: ltr;
+}
+.credit-main-grid > .panel {
+  direction: rtl;
+  min-height: 343px;
+  padding: 12px 17px;
+}
+.credit-risk-page .panel-heading h2 {
+  font-size: 19px;
+}
+.credit-risk-page .panel-heading {
+  margin-bottom: 10px;
+}
+.evidence-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  direction: ltr;
+}
+.evidence-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 500;
+  min-width: 0;
+}
+.evidence-display small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 400;
+}
+.evidence-value > .badge {
+  font-size: 9px;
+  padding: 1px 6px;
+}
+.evidence-missing {
+  color: var(--muted);
+  font-size: 17px;
+}
+.credit-quality-alert {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 14px;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--warning-bg) 60%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.credit-quality-alert > div {
+  flex: 1;
+}
+.credit-quality-alert strong {
+  font-size: 16px;
+}
+.credit-quality-alert p {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.credit-sync {
+  direction: ltr;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+  margin-top: 14px;
+  font-size: 12px;
+  gap: 10px;
+}
+.credit-sync span {
+  direction: rtl;
+  color: var(--text-secondary);
+}
+.credit-sync time {
+  font-size: 14px;
+}
+.credit-quality-fields {
+  margin: 5px 0 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+.credit-quality-fields > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 9px;
+  gap: 8px;
+}
+.credit-quality-fields > div + div {
+  border-top: 1px solid var(--border-subtle);
+}
+.credit-quality-fields dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.credit-quality-fields dd {
+  margin: 0;
+}
+.credit-detail-list {
+  margin: 0;
+}
+.credit-detail-list > div {
+  display: flex;
+  direction: ltr;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 43px;
+}
+.credit-detail-list dt {
+  font-size: 13px;
+  color: var(--text-secondary);
+  direction: rtl;
+  white-space: nowrap;
+}
+.credit-detail-list dd {
+  margin: 0;
+  text-align: right;
+  font-size: 15px;
+}
+.credit-detail-list > div:last-child {
+  border: 0;
+}
+.credit-detail-list > div:last-child .evidence-value {
+  gap: 2px 6px;
+}
+.credit-detail-list > div:last-child .evidence-display {
+  font-size: 12px;
+}
+.credit-sample-note {
+  display: flex;
+  align-items: center;
+  flex-direction: row-reverse;
+  gap: 10px;
+  padding: 9px 11px;
+  margin-top: 5px;
+  border: 1px solid color-mix(in srgb, var(--gold) 60%, var(--border));
+  background: color-mix(in srgb, var(--warning-bg) 50%, var(--surface));
+  color: var(--gold);
+  border-radius: 7px;
+  font-size: 12px;
+}
+.internal-limit {
+  display: flex;
+  direction: ltr;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  margin: 7px 0 11px;
+}
+.internal-limit > span {
+  direction: rtl;
+  white-space: nowrap;
+}
+.internal-limit .progress-track {
+  flex: 1;
+  height: 15px;
+}
+.internal-limit b {
+  color: var(--gold);
+  font-size: 19px;
+}
+.capacity-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.capacity-warning {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 5px 0 8px;
+}
+.capacity-warning svg {
+  color: var(--blue);
+}
+.credit-limits {
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+.credit-limits > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 7px 0;
+  min-height: 39px;
+}
+.credit-limits dt {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  flex-direction: row-reverse;
+  gap: 12px;
+  font-size: 12px;
+}
+.credit-limits dt svg {
+  width: 21px;
+  height: 21px;
+}
+.credit-limits > div:last-child dt svg {
+  color: var(--negative);
+}
+.credit-limits dd {
+  margin: 0;
+}
+.credit-limits dd > .badge {
+  font-size: 11px;
+  padding: 2px 7px;
+}
+.credit-limit-note {
+  color: var(--muted);
+  font-size: 9px;
+  margin-top: 6px;
+}
+.credit-bottom-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 0.59fr 1fr;
+  gap: 12px;
+  direction: ltr;
+  align-items: start;
+}
+.credit-bottom-grid > .panel {
+  direction: rtl;
+  padding: 10px 15px;
+  min-height: 244px;
+}
+.credit-bottom-grid .panel-heading h2 {
+  font-size: 18px;
+}
+.account-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.account-empty > svg {
+  color: var(--text-secondary);
+  display: block;
+  margin: 1px auto 8px;
+}
+.account-empty > strong {
+  display: block;
+  font-size: 16px;
+  color: var(--text);
+}
+.account-empty p {
+  font-size: 11px;
+  margin: 1px 0 9px;
+}
+.account-empty button {
+  border: 1px solid var(--border);
+  background: var(--track);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 9px;
+  width: 100%;
+}
+.local-account-status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.local-account-status .badge {
+  font-size: 9px;
+  padding: 1px 6px;
+}
+.credit-verification {
+  margin-top: 5px;
+  font-size: 12px;
+}
+.credit-verification summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--blue);
+  padding-block: 4px;
+}
+.credit-verification summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.credit-verification dl {
+  margin: 8px 0;
+}
+.credit-verification dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.credit-verification dt {
+  color: var(--text-secondary);
+}
+.credit-verification dd {
+  margin: 0;
+}
+.credit-verification .evidence-display {
+  font-size: 10px;
+}
+.credit-verification ul {
+  padding-right: 18px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.credit-verification > p {
+  text-align: center;
+  color: var(--negative);
+  background: var(--danger-bg);
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.holdings-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: -2px 0 9px;
+}
+.holdings-note svg {
+  color: var(--blue);
+}
+.credit-holdings table {
+  font-size: 13px;
+  direction: ltr;
+}
+.credit-holdings th,
+.credit-holdings td {
+  text-align: center;
+  padding: 9px;
+}
+.credit-holdings thead th {
+  font-size: 11px;
+}
+.credit-holdings tbody th {
+  text-align: left;
+  font-size: 14px;
+  background: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.credit-holdings td .badge {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.credit-holdings tfoot th {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  direction: rtl;
+}
+.credit-holdings tfoot tr {
+  border-top: 1px solid var(--border);
+}
+.credit-holdings tfoot .badge {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.asset-symbol {
+  display: inline-grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 24px;
+  margin-right: 12px;
+  vertical-align: middle;
+}
+.asset-btc {
+  background: #ff9d00;
+}
+.asset-usdt {
+  background: #14a88f;
+}
+.risk-equity-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.risk-equity-unavailable svg {
+  color: var(--gold);
+}
+@media (max-width: 1450px) {
+  .credit-main-grid {
+    min-width: 0;
+    grid-template-columns: 1fr 1fr;
+  }
+  .credit-main-grid > .credit-capacity {
+    grid-column: 1/-1;
+    min-height: 0;
+  }
+  .credit-main-grid > .credit-quality,
+  .credit-main-grid > .credit-details {
+    min-height: 330px;
+  }
+  .credit-metric .metric-copy > strong {
+    font-size: 28px;
+  }
+  .credit-metric .metric-label {
+    font-size: 12px;
+  }
+  .credit-risk-page .risk-banner > strong {
+    font-size: 14px;
+  }
+  .credit-risk-page .panel-heading h2 {
+    font-size: 17px;
+  }
+  .credit-bottom-grid {
+    min-width: 0;
+    grid-template-columns: 0.75fr 1fr;
+  }
+  .credit-holdings table {
+    font-size: 12px;
+  }
+  .credit-holdings th,
+  .credit-holdings td {
+    padding: 8px 6px;
+  }
+  .credit-holdings tbody th {
+    font-size: 12px;
+  }
+  .credit-holdings thead th {
+    font-size: 10px;
+  }
+  .asset-symbol {
+    margin-right: 5px;
+    width: 23px;
+    height: 23px;
+    font-size: 20px;
+  }
+}
+@media (max-width: 1100px) {
+  .credit-bottom-grid {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .credit-bottom-grid > .credit-holdings {
+    grid-row: 1;
+  }
+  .credit-bottom-grid > .panel {
+    min-height: 0;
+  }
+  .credit-detail-list dt {
+    font-size: 11px;
+  }
+  .credit-detail-list dd {
+    font-size: 13px;
+  }
+  .credit-main-grid > .panel {
+    padding-inline: 12px;
+  }
+}
+@media (max-width: 760px) {
+  .credit-risk-page {
+    gap: 10px;
+  }
+  .credit-risk-page .risk-banner > strong {
+    font-size: 13px;
+  }
+  .credit-metric .metric-copy > strong {
+    font-size: clamp(20px, 5vw, 28px);
+  }
+  .credit-metric .metric-label {
+    font-size: 10px;
+  }
+  .credit-metric-status {
+    right: 7px;
+    bottom: 7px;
+  }
+  .credit-metric-status .badge {
+    font-size: 7px;
+    padding: 1px 4px;
+  }
+  .credit-main-grid {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .credit-main-grid > .panel {
+    min-height: 0;
+    padding: 12px;
+  }
+  .credit-main-grid > .credit-capacity {
+    grid-column: auto;
+    grid-row: 1;
+  }
+  .credit-bottom-grid > .panel {
+    padding: 12px;
+  }
+  .credit-risk-page .panel-heading h2 {
+    font-size: 16px;
+  }
+  .credit-detail-list dt {
+    font-size: 12px;
+  }
+  .credit-detail-list dd {
+    font-size: 14px;
+  }
+  .credit-detail-list .evidence-value > .badge {
+    font-size: 8px;
+  }
+  .credit-detail-list > div:last-child .evidence-display {
+    font-size: 10px;
+  }
+  .internal-limit {
+    gap: 8px;
+    font-size: 10px;
+  }
+  .internal-limit b {
+    font-size: 16px;
+  }
+  .credit-limits dt {
+    font-size: 11px;
+    gap: 8px;
+  }
+  .credit-limits .evidence-value {
+    gap: 5px;
+  }
+  .credit-limits .evidence-value > .badge {
+    font-size: 8px;
+  }
+  .credit-limits dd > .badge {
+    font-size: 9px;
+  }
+  .credit-holdings table {
+    min-width: 580px;
+  }
+  .holdings-note {
+    font-size: 10px;
+  }
+  .risk-equity-unavailable {
+    font-size: 10px;
+  }
+  .credit-quality-alert strong {
+    font-size: 15px;
+  }
+  .local-account-status {
+    font-size: 10px;
+  }
+  .credit-risk-page .evidence-display {
+    gap: 5px;
+  }
+}
+
+/* Keep the accessible table caption inside its local scroll container on resize. */
+.credit-holdings .table-scroll {
+  position: relative;
+}

@@ -3,11 +3,16 @@ import { Icon, type IconName } from "./Icon";
 import { Badge } from "./Panel";
 import { DEMO } from "../data/demo";
 export type Theme = "dark" | "light";
-export type PageId = "overview" | "decision-center";
+export const PAGE_TITLES = {
+  overview: "نمای کلی",
+  "credit-risk": "اعتبار و ریسک",
+  "decision-center": "مرکز تصمیم",
+} as const;
+export type PageId = keyof typeof PAGE_TITLES;
 const navigation: readonly { label: string; icon: IconName; page?: PageId }[] =
   [
     { label: "نمای کلی", icon: "home", page: "overview" },
-    { label: "اعتبار و ریسک", icon: "shield" },
+    { label: "اعتبار و ریسک", icon: "shield", page: "credit-risk" },
     { label: "استراتژی و بازار", icon: "chart" },
     { label: "مرکز تصمیم", icon: "nodes", page: "decision-center" },
     { label: "موقعیت‌ها و سفارش‌ها", icon: "orders" },
@@ -115,7 +120,7 @@ export function AppShell({
               <Icon name="menu" />
             </button>
             <div>
-              <h1>{page === "decision-center" ? "مرکز تصمیم" : "نمای کلی"}</h1>
+              <h1>{PAGE_TITLES[page]}</h1>
               <p>حساب اعتباری والکس · سناریوی نمایشی</p>
             </div>
           </div>
