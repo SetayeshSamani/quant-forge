@@ -7,6 +7,7 @@ import {
   DEMO_JOURNAL_STAGE_IDS,
   type DecisionStageId,
 } from "../data/decisions";
+import { HISTORICAL_TP1_ASSESSMENT } from "../data/historicalAssessment";
 import "../styles/decision-center.css";
 
 export function DecisionCenter() {
@@ -33,6 +34,41 @@ export function DecisionCenter() {
   };
   return (
     <div className="decision-center">
+      <Panel
+        title="ارزیابی تاریخی TP-1 · BTCTMN"
+        icon="clock"
+        className="historical-assessment"
+        action={<Badge tone="info">HISTORICAL / OFFLINE</Badge>}
+      >
+        <p>
+          خلاصهٔ نتیجهٔ واقعی آفلاین، گزارش‌شده توسط مالک پروژه؛ بدون اتصال زنده.
+          این بخش از سناریوهای مصنوعی DEMO پایین صفحه مستقل است.
+        </p>
+        <dl className="stage-evidence">
+          {[
+            ["کندل H1", HISTORICAL_TP1_ASSESSMENT.h1_candles],
+            ["کندل M15", HISTORICAL_TP1_ASSESSMENT.m15_candles],
+            ["گام ارزیابی‌شده", HISTORICAL_TP1_ASSESSMENT.evaluated_steps],
+            ["گام واجد شرایط فنی", HISTORICAL_TP1_ASSESSMENT.eligible_steps],
+            ["خطا", HISTORICAL_TP1_ASSESSMENT.errors],
+            ["تصمیم", HISTORICAL_TP1_ASSESSMENT.action],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd dir="ltr">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p>
+          هش، بازهٔ UTC، cutoff و دلایل هر گام به این خلاصه پیوست نشده‌اند.
+          موجودی، اعتبار، کارمزد، تازگی مظنه و مجوز اجرا تأیید نشده‌اند؛
+          هیچ معامله، سود یا آمادگی بازار از این نتیجه استنباط نمی‌شود.
+        </p>
+        <details className="raw-demo-evidence">
+          <summary>مشاهدهٔ خلاصهٔ تاریخی · فقط خواندنی</summary>
+          <pre dir="ltr">{JSON.stringify(HISTORICAL_TP1_ASSESSMENT, null, 2)}</pre>
+        </details>
+      </Panel>
       <div className="demo-banner" role="note">
         <Icon name="info" />
         <strong>داده‌های نمایشی · معامله واقعی غیرفعال · DEMO</strong>
