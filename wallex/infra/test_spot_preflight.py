@@ -44,7 +44,8 @@ def invoke(case=None):
         paths.append(request.path)
         if request.path == "/sub-accounts": payload = accounts
         elif request.path == "/v1/account/balances-detail": payload = balances
-        elif request.path.startswith("/v1/account/openOrders?"): payload = orders
+        elif request.path.startswith("/v1/account/openOrders?"):
+            payload = orders if "page=1&" in request.path else {"success":True, "result":{"orders":[]}}
         else: raise AssertionError("Forbidden endpoint")
         if case in ("401", "403", "500") and request.path == "/v1/account/balances-detail": return HttpReply(int(case),b"secret-body")
         return HttpReply(200,json.dumps(payload).encode())
@@ -62,7 +63,7 @@ class SpotPreflightTests(unittest.TestCase):
         self.assertEqual(paths,["/sub-accounts","/v1/account/balances-detail","/v1/account/openOrders?page=1&per_page=100"])
         self.assertTrue(report["quote_available_positive"])
         self.assertFalse(report["base_exposure_present"])
-        self.assertEqual(report["order_coverage"],"PROVIDER_REPORTED_COMPLETE_NOT_ATOMIC")
+        self.assertEqual(report["order_coverage"],"UNVERIFIED_PROVIDER_PAGINATION")
         self.assertEqual(report["open_orders_observed"],0)
         self.assertIn("ACTUAL_FEES_UNVERIFIED",report["blockers"])
         self.assertIn("TRADE_PERMISSION_NOT_VERIFIED_BY_READS",report["blockers"])
@@ -121,6 +122,51 @@ class SpotPreflightTests(unittest.TestCase):
                 if case=="metadata": self.assertIn("ORDER_COVERAGE_UNVERIFIED",report["blockers"])
                 if case=="orders": self.assertIn("OPEN_OR_UNKNOWN_ORDERS_PRESENT",report["blockers"])
                 if case=="exposure": self.assertIn("EXPOSURE_RECONCILIATION_REQUIRED",report["blockers"])
+
+    def test_untyped_spot_metadata_does_not_imply_auth_failure_or_complete_coverage(self):
+        cfg, accounts, balances, orders, market = fixture()
+        for info in (None, {}, "synthetic-private-metadata-not-to-echo", [],
+                     {"page":"1", "count":"0", "total_count":"0"},
+                     {"page":1, "count":100, "total_count":0},
+                     {"page":1, "count":0, "total_count":0}):
+            with self.subTest(format=type(info).__name__):
+                transport = Mock()
+                response = deepcopy(orders)
+                response["result_info"] = info
+                transport.get.side_effect = [HttpReply(200, json.dumps(p).encode()) for p in (accounts, balances, response)]
+                report = spot.check_account(cfg, connect=True, transport=transport, resolve_credential=lambda ref:FAKE,
+                                            market_get=lambda:market, clock=lambda:1800000)
+                self.assertTrue(report["authenticated_reads_succeeded"])
+                self.assertEqual(report["open_orders_observed"],0)
+                self.assertEqual(report["order_coverage"],"UNVERIFIED_PROVIDER_PAGINATION")
+                self.assertIn("ORDER_COVERAGE_UNVERIFIED",report["blockers"])
+                self.assertEqual(report["order_pagination_diagnostics"][0]["result_info_format"],spot._format(info))
+                self.assertNotIn("synthetic-private-metadata-not-to-echo",spot.canonical_json(report))
+                self.assertEqual(report["action"],"NO_TRADE")
+                self.assertFalse(report["executable_ready"])
+                self.assertEqual(transport.get.call_count,3)
+        # Never continue beyond the fixed three-page budget, and reject ignored
+        # page parameters/duplicate order identities instead of double counting.
+        for duplicate in (False,True):
+            with self.subTest(duplicate=duplicate):
+                pages=[]
+                for i in range(3):
+                    pages.append({"success":True,"result":{"orders":[{
+                        "clientOrderId": "synthetic-"+str(0 if duplicate else i),
+                        "symbol":"BTCTMN","active":True,"side":"BUY","status":"NEW",
+                        "origQty":"0.1","executedQty":"0"}]}})
+                transport=Mock()
+                transport.get.side_effect=[HttpReply(200,json.dumps(p).encode()) for p in (accounts,balances,*pages)]
+                report=spot.check_account(cfg,connect=True,transport=transport,resolve_credential=lambda ref:FAKE,
+                                          market_get=lambda:market,clock=lambda:1800000)
+                self.assertLessEqual(transport.get.call_count,5)
+                self.assertFalse(report["executable_ready"])
+                if duplicate:
+                    self.assertFalse(report["authenticated_reads_succeeded"])
+                    self.assertIn("orders:MALFORMED_DUPLICATE_OR_UNKNOWN_ORDER_EVIDENCE",report["blockers"])
+                else:
+                    self.assertTrue(report["authenticated_reads_succeeded"])
+                    self.assertIn("ORDER_PAGINATION_BUDGET_EXHAUSTED",report["blockers"])
 
     def test_optin_hidden_prompt_and_get_route_boundaries(self):
         cfg,*_=fixture()

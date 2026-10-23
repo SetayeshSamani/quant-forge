@@ -58,7 +58,7 @@ def _report():
             "discovery_identity_matched": False, "account_type": "UNVERIFIED",
             "balances": "UNAVAILABLE", "quote_available_positive": None,
             "base_exposure_present": None, "other_asset_exposure_present": None,
-            "open_orders_observed": None, "order_coverage": "UNVERIFIED",
+            "open_orders_observed": None, "order_coverage": "UNVERIFIED", "order_pagination_diagnostics": [],
             "market": "UNVERIFIED", "fees": "UNVERIFIED", "trade_permission": "UNVERIFIED",
             "observed_at": None, "endpoints": {}, "blockers": list(BASE_BLOCKERS),
             "action": "NO_TRADE", "executable_ready": False}
@@ -180,7 +180,8 @@ def check_account(config=None, *, connect=False, transport=None, resolve_credent
         except Exception as error:
             report["blockers"].append("balances:" + _reason(error))
         try:
-            observed, ids, expected = 0, set(), None
+            observed, ids = 0, set()
+            report["blockers"].append("ORDER_COVERAGE_UNVERIFIED")
             for page in range(1, 4):
                 data = read("/v1/account/openOrders?" + urlencode({"page": page, "per_page": 100}))
                 grouped = data["result"]
@@ -200,25 +201,22 @@ def check_account(config=None, *, connect=False, transport=None, resolve_credent
                         raise ValueError("INCONSISTENT_ORDER_QUANTITY")
                 observed += len(rows)
                 report["open_orders_observed"] = observed
+                # Official Spot result_info is untyped, unlike credit discovery.
+                # Inspect its shape only; never invent pagination field semantics
+                # or turn an empty page into proof of complete account coverage.
                 info = data.get("result_info")
-                if info is None:
-                    report["order_coverage"] = "UNKNOWN_PAGINATION_METADATA"
-                    report["blockers"].append("ORDER_COVERAGE_UNVERIFIED")
-                    orders_ok = True
-                    break
-                if (type(info) is not dict or any(type(info.get(k)) is not int for k in ("page", "count", "total_count"))
-                        or info["page"] != page or info["count"] != len(rows) or not observed <= info["total_count"] <= 300
-                        or (expected is not None and info["total_count"] != expected)):
-                    raise ValueError("INCOMPLETE_OR_CHANGING_ORDER_COVERAGE")
-                expected = info["total_count"]
-                if observed == expected:
-                    report["order_coverage"] = "PROVIDER_REPORTED_COMPLETE_NOT_ATOMIC"
-                    orders_ok = True
-                    break
+                report["order_pagination_diagnostics"].append({
+                    "requested_page": page,
+                    "result_info_format": "ABSENT" if "result_info" not in data else _format(info),
+                    "field_formats": {key: _format(info[key]) if type(info) is dict and key in info else "ABSENT"
+                                      for key in ("page", "count", "total_count", "per_page")},
+                })
+                report["order_coverage"] = "UNVERIFIED_PROVIDER_PAGINATION"
                 if not rows:
-                    raise ValueError("INCOMPLETE_ORDER_COVERAGE")
-            if not orders_ok:
-                raise ValueError("ORDER_PAGINATION_BUDGET_EXHAUSTED")
+                    break  # Bounded stopping rule only, never a flatness claim.
+            else:
+                report["blockers"].append("ORDER_PAGINATION_BUDGET_EXHAUSTED")
+            orders_ok = True  # Valid authenticated reads, not complete coverage.
             if observed:
                 report["blockers"].append("OPEN_OR_UNKNOWN_ORDERS_PRESENT")
         except Exception as error:
@@ -247,6 +245,21 @@ def check_account(config=None, *, connect=False, transport=None, resolve_credent
     except Exception as error:
         report["blockers"].append(_reason(error))
     return report
+
+
+def _format(value):
+    """Categorical metadata only; never echo unknown provider values/keys."""
+    if value is None:
+        return "NULL"
+    if type(value) is dict:
+        return "OBJECT"
+    if type(value) is int:
+        return "INTEGER"
+    if type(value) is str:
+        return "STRING"
+    if type(value) is list:
+        return "ARRAY"
+    return "OTHER"
 
 
 def _reason(error):
