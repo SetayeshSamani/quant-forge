@@ -71,6 +71,14 @@ class ReplayGateway:
         # recoverable. Never repeat transport I/O to recover an audit commit.
         return self.ledger.receipt(record.request.intent.intent_id)
 
+    def submit_checked(self, request: ExecutionRequest, evidence) -> GatewayResult:
+        """Additional synthetic risk/market admission; LIVE remains unavailable."""
+        from .admission import assess_replay_admission
+        assessment = assess_replay_admission(request, evidence, now=self._now())
+        if not assessment.local_checks_passed:
+            raise ExecutionRefused("Replay admission: " + ",".join(assessment.reasons))
+        return self.submit(request)
+
     def submit(self, request: ExecutionRequest) -> GatewayResult:
         if not isinstance(request, ExecutionRequest):
             raise ContractError("Expected the exact typed offline execution request.")
