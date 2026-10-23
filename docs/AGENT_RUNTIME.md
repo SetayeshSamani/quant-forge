@@ -10,6 +10,16 @@ or intent, and never calls submit/cancel. All results remain NO_TRADE and
 executable_ready=false. The UI can import sanitized captured reports, without
 a live management API or browser credentials.
 
+Owner-run independent account preflight on **2026-10-23** returned HTTP 200 for
+`/sub-accounts`, `/v1/account/balances-detail` and `/v1/account/openOrders`.
+The selected active, unsuspended prop identity matched; balances validated and
+quote availability was positive. Zero open orders were observed, but complete
+coverage was not established. The initial collector incorrectly required credit-
+style pagination fields from Spot `result_info`; that assumption is removed.
+The revised collector is synthetic-test verified; an owner rerun is still needed.
+No private request or key was handled by Codex. These reads establish neither
+trading permission nor risk authorization; the original package 401 is separate.
+
 Live admission cannot safely be implemented by wiring an HTTP order endpoint:
 - `wallex/risk/pipeline.py`: permanently diagnostic; no approved risk/admission token.
 - `wallex/execution/gateway.py`: ReplayGateway rejects LIVE and real exits; its
@@ -44,8 +54,11 @@ unknown-type or inactive identities fail closed. There is no main-account fallba
 The first discovery GET sends only `x-api-key`. Once explicitly selected, both
 `x-api-key` and `sub-account-client-id` are required for refreshed discovery and
 GET `/v1/account/balances-detail`, GET `/v1/account/openOrders`. Orders are bounded
-to three pages / 300 records. Null pagination metadata stays UNVERIFIED, even if
-zero orders were observed. The public market GET is `/hector/web/v1/markets`.
+to three pages / 300 records. Official Spot `result_info` is untyped: no
+`page/count/total_count` shape is assumed. Its fixed-field type diagnostics are
+redacted; empty or differently shaped metadata is not an authentication failure.
+A validated read stays distinct from coverage, which remains UNVERIFIED even
+with zero observed orders. Empty pages stop collection without proving flatness. The public market GET is `/hector/web/v1/markets`.
 The endpoint-specific active-package 401 is not used by this independent path.
 The existing credit-plan preflight remains available and strict, separately;
 missing plan evidence still blocks credit-risk approval.
