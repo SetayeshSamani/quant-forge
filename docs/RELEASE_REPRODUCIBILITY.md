@@ -37,7 +37,12 @@ Container commands below are prepared, **not successfully verified locally**:
 Docker daemon is available, but Docker Hub Python layer download returned HTTP403.
 
 ```powershell
-docker build --build-arg SOURCE_COMMIT=$sha -t quantforge:$sha .
+# Build from tracked source only; clean status alone ignores local ignored files.
+$buildZip = "$env:TEMP\quantforge-build-$sha.zip"
+$buildContext = "$env:LOCALAPPDATA\QuantForge\build-$sha"
+git archive --format=zip --output="$buildZip" $sha
+Expand-Archive -LiteralPath "$buildZip" -DestinationPath "$buildContext" # NEW path
+docker build --build-arg SOURCE_COMMIT=$sha -t quantforge:$sha "$buildContext"
 docker volume create quantforge-public-data
 docker run --name quantforge-release -p 127.0.0.1:8080:8080 --mount source=quantforge-public-data,target=/data quantforge:$sha --host 0.0.0.0 --port 8080 --state-dir /data/observer --frontend-dir /app/frontend/dist --fetch-public --symbol BTCTMN --base BTC --quote TMN --volume-unit base
 # Different terminal, after observing real API/UI results:
