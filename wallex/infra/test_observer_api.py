@@ -8,6 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from unittest.mock import patch,Mock
+import signal
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -105,3 +107,14 @@ class ObserverApiTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=3)
+
+    def test_release_revision_and_sigterm_use_controlled_shutdown(self):
+        for value,expected in (("a"*40,"a"*40),("invalid-private-value",None)):
+            with self.subTest(revision=value[:7]),patch.dict(api.os.environ,{"QF_SOURCE_COMMIT":value}):
+                self.assertEqual(api._revision(),expected)
+        handlers={}
+        server=Mock()
+        server.serve_forever.side_effect=lambda **_:handlers[signal.SIGTERM]()
+        with patch.object(api,'Server',return_value=server),patch.object(api.signal,'signal',side_effect=lambda key,handler:handlers.update({key:handler})):
+            self.assertEqual(api.main(['--state-dir','synthetic-unused-state']),0)
+        server.server_close.assert_called_once()

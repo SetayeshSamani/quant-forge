@@ -146,3 +146,14 @@ Public depth receipt time is not provider event time or verified freshness.
 MarketFrame schemas remain provisional; technical eligibility never authorizes
 trading. No backtested profitability, completed trades or verified capacity is
 claimed. The demo is ready for presentation, not production trading.
+
+## Final hackathon release evidence
+
+See [competition submission, evidence matrix and five-minute outline](docs/HACKATHON_SUBMISSION.md)
+and [exact reproduction/source/Docker commands](docs/RELEASE_REPRODUCIBILITY.md).
+The existing fee-aware engine and TP-1 Shadow are composed by
+`python -B -m wallex.shadow.release_evidence --help`; real market files stay
+outside Git and retain hashes/cutoffs. Simulation costs/capital are explicit
+assumptions. TP-1 remains NO_TRADE; no live performance or actual AI contribution
+is claimed. Docker Hub layer HTTP403 currently blocks local image verification;
+native port8080 UI/API/collection and controlled stop/persistence were checked.
