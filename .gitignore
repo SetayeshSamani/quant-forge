@@ -1,0 +1,29 @@
+
+# Local credentials: examples are the only permitted env files.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.env.bak
+*.env.backup
+*.env.old
+*.env.save
+*.env.tmp
+.env~
+*.key
+*.pem
+# Private/public runtime evidence stays local, never in the source release.
+/data/
+/.local/
+/runtime/
+*.sqlite*
+*.db
+*.log
+__pycache__/
+*.py[cod]
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/

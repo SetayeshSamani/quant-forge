@@ -197,10 +197,15 @@ class SpotPreflightTests(unittest.TestCase):
                 transport.get(HttpGet(path, {"x-api-key": FAKE}, 5, 1024))
         args=["--connect","--symbol","BTCTMN","--base","BTC","--quote","TMN"]
         out=StringIO()
-        with patch.object(spot.sys.stdin,"isatty",return_value=True),patch.object(spot.sys.stderr,"isatty",return_value=True), \
+        from types import SimpleNamespace
+        settings=SimpleNamespace(wallex_api_key=FAKE,wallex_subaccount_id=cfg.sub_account_client_id,
+            wallex_symbol="BTCTMN",assets=("BTC","TMN"))
+        with patch("wallex.infra.config.load_settings",return_value=settings), \
+             patch.object(spot,"_prompt_credential") as prompt, \
              patch.object(spot,"check_account",return_value=spot._report()) as check,redirect_stdout(out):
             self.assertEqual(spot.main(args),1)
-        self.assertIs(check.call_args.kwargs["resolve_credential"],spot._prompt_credential)
+        self.assertEqual(check.call_args.kwargs["resolve_credential"]("ignored"),FAKE)
+        prompt.assert_not_called()
         self.assertTrue(check.call_args.kwargs["connect"])
-        self.assertIs(check.call_args.kwargs["select_account"], spot._select_account)
+        self.assertEqual(check.call_args.kwargs["select_account"]((cfg,)),cfg)
         self.assertFalse(json.loads(out.getvalue())["executable_ready"])

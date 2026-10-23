@@ -139,9 +139,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--review-ai", action="store_true", help="Explicit one-call BoxAPI opt-in; hidden prompt")
+    parser.add_argument("--review-ai", action="store_true", help="Explicit one-call BoxAPI opt-in; backend .env credentials")
     parser.add_argument("--assess-observation", action="store_true",
                         help="Explicit real-model research assessment even without a TP-1 candidate")
+    parser.add_argument("--env-file", type=Path)
     args = parser.parse_args(argv)
     if not (args.review_ai or args.assess_observation):
         print(canonical_json({"status": "AI_OPT_IN_REQUIRED", "action": "NO_TRADE", "executable_ready": False}))
@@ -184,16 +185,12 @@ def main(argv=None):
         if args.assess_observation and not baseline["evaluated_steps"]:
             raise ValueError("NO_VALID_TECHNICAL_ASSESSMENT_AVAILABLE")
         if args.assess_observation or baseline["summary"]["technical_eligible_steps"]:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", getpass.GetPassWarning)
-                secret = getpass.getpass("BoxAPI key (hidden; never stored): ")
-            try:
-                adviser = CandidateAdviser(BoxAPIClient(api_key=secret, transport=UrllibTransport(), timeout_seconds=30),
-                    source_commit=args.source_commit, evidence_kind=settings["evidence_kind"],
-                    source_hashes={k: observed["source_hashes"][k] for k in ("m1", "h1")},
-                    assess_observation=args.assess_observation)
-            finally:
-                secret = None
+            from wallex.infra.config import load_settings
+            settings_config=load_settings(args.env_file)
+            adviser = CandidateAdviser(BoxAPIClient.from_settings(settings_config),
+                source_commit=args.source_commit, evidence_kind=settings["evidence_kind"],
+                source_hashes={k: observed["source_hashes"][k] for k in ("m1", "h1")},
+                assess_observation=args.assess_observation)
             target = max(step["as_of"] for step in baseline["evaluated_steps"]) if args.assess_observation else None
             def review_step(frame, assessment):
                 if target is not None and frame.as_of != target:
@@ -217,7 +214,7 @@ def main(argv=None):
         return 0 if report["inference_succeeded"] else 1
     except (Exception, KeyboardInterrupt) as error:
         known = {"PUBLIC_EVIDENCE_UNAVAILABLE", "SOURCE_SEARCH_LIMIT", "SOURCE_HASH_MISMATCH", "SOURCE_COMMIT_REQUIRED",
-                 "GENUINE_HISTORICAL_OBSERVATIONS_REQUIRED", "NO_VALID_TECHNICAL_ASSESSMENT_AVAILABLE", "AUDIT_READBACK_FAILED"}
+                 "GENUINE_HISTORICAL_OBSERVATIONS_REQUIRED", "NO_VALID_TECHNICAL_ASSESSMENT_AVAILABLE", "AUDIT_READBACK_FAILED", "BOXAPI_API_KEY_MISSING", "BOXAPI_ORIGIN_OR_ROUTE_NOT_ALLOWED"}
         reason = str(error) if type(error) is ValueError and str(error) in known else "LOCAL_EVIDENCE_OR_PROMPT_ERROR"
         print(canonical_json({"status": "AI_REVIEW_FAILED_CLOSED", "reason": reason, "action": "NO_TRADE", "executable_ready": False}))
         return 1

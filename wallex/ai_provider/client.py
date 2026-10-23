@@ -151,6 +151,14 @@ class BoxAPIClient:
         self._model = model
         self._timeout = timeout_seconds
 
+    @classmethod
+    def from_settings(cls, settings=None, *, transport=None):
+        from wallex.infra.config import load_settings, ConfigurationError
+        settings=load_settings() if settings is None else settings
+        if not settings.boxapi_api_key:raise ConfigurationError("BOXAPI_API_KEY_MISSING")
+        if settings.boxapi_endpoint!=ENDPOINT:raise ConfigurationError("BOXAPI_ORIGIN_OR_ROUTE_NOT_ALLOWED")
+        return cls(api_key=settings.boxapi_api_key,transport=transport or UrllibTransport(),model=settings.boxapi_model,timeout_seconds=30)
+
     @property
     def endpoint(self):
         return ENDPOINT
