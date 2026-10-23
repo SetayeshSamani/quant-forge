@@ -54,17 +54,22 @@ class WireResponse:
 
 def _allowed(method, path):
     return ((method == "POST" and path == "/v1/account/orders")
-        or (method == "DELETE" and re.fullmatch(r"/v1/account/orders\?clientOrderId=[A-Za-z0-9_]{1,64}", path))
+        or (method == "DELETE" and re.fullmatch(r"/v1/account/orders/[A-Za-z0-9_]{1,64}", path))
         or (method == "GET" and (re.fullmatch(r"/v1/account/orders/[A-Za-z0-9_]{1,64}", path)
             or re.fullmatch(r"/v1/account/(openOrders|trades)\?symbol=[A-Z0-9]{3,30}", path)
-            or path in ("/v1/account/balances-detail", "/sub-accounts"))))
+            or re.fullmatch(r"/v1/account/(orders|openOrders|trades)\?page=[1-3]&per_page=100",path)
+            or re.fullmatch(r"/v1/depth\?symbol=[A-Z0-9]{3,30}",path)
+            or path in ("/v1/account/balances-detail", "/sub-accounts", "/v1/account/fee", "/v1/markets"))))
 
 
 class HTTPSExchangeTransport:
     """No proxy/redirect/retry; socket timeout and bytes bounded, TLS verified."""
     def send(self, request):
         if (type(request) is not WireRequest or not _allowed(request.method, request.path)
-                or request.timeout != 5 or set(request.headers) != ({"x-api-key", "Content-Type", "Accept-Encoding"} if request.path=="/sub-accounts" else {"x-api-key", "sub-account-client-id", "Content-Type", "Accept-Encoding"})):
+                or request.timeout != 5 or set(request.headers) != (
+                    {"Content-Type", "Accept-Encoding"} if request.path=="/v1/markets" or request.path.startswith("/v1/depth?") else
+                    {"x-api-key", "Content-Type", "Accept-Encoding"} if request.path=="/sub-accounts" else
+                    {"x-api-key", "sub-account-client-id", "Content-Type", "Accept-Encoding"})):
             raise ExchangeUnavailable("INVALID_HTTP_REQUEST")
         if request.method in ("POST","DELETE"):
             from .live import _WritePermit
@@ -79,7 +84,7 @@ class HTTPSExchangeTransport:
                     if body.get("client_id")!=permit.client_id:raise ValueError()
                 except Exception:
                     raise ExchangeUnavailable("PERMIT_ORDER_MISMATCH") from None
-            elif request.path!="/v1/account/orders?clientOrderId="+permit.client_id:
+            elif request.path!="/v1/account/orders/"+permit.client_id:
                 raise ExchangeUnavailable("PERMIT_ORDER_MISMATCH")
         opener = build_opener(ProxyHandler({}), _NoRedirect(), HTTPSHandler(context=ssl.create_default_context()))
         wire = Request(ORIGIN+request.path, method=request.method, headers=request.headers, data=request.body)
@@ -173,9 +178,11 @@ class WallexExchange:
     def _read(self, method, path, body=None, *, envelope=False, permit=None):
         if not _allowed(method, path):
             raise ExchangeUnavailable("ENDPOINT_NOT_ALLOWED")
-        self.last_http_status, self.last_failure_code = None, None
-        headers={"x-api-key":self._key,"Content-Type":"application/json","Accept-Encoding":"identity"}
-        if path!="/sub-accounts":headers["sub-account-client-id"]=self.account_id
+        self.last_http_status, self.last_failure_code, self.last_hash = None, None, None
+        headers={"Content-Type":"application/json","Accept-Encoding":"identity"}
+        public=path=="/v1/markets" or path.startswith("/v1/depth?")
+        if not public:headers["x-api-key"]=self._key
+        if not public and path!="/sub-accounts":headers["sub-account-client-id"]=self.account_id
         request = WireRequest(method,path,headers,body,permit=permit)
         try:
             response = self._transport.send(request)
@@ -241,7 +248,7 @@ class WallexExchange:
         if account_id != self.account_id or client_id not in self._intents:
             raise ExchangeUnavailable("UNBOUND_ORDER_SCOPE")
         permit=self._consume_permit(client_id, "CANCEL")
-        self._read("DELETE", "/v1/account/orders?"+urlencode({"clientOrderId":client_id}),permit=permit)
+        self._read("DELETE", "/v1/account/orders/"+client_id,permit=permit)
         return self.lookup(account_id, client_id)  # DELETE acknowledgement alone never proves cancellation.
 
     def _observation(self, intent, row):
@@ -254,7 +261,7 @@ class WallexExchange:
         if filled > intent.quantity_base or type(row.get("active")) is not bool:
             raise ExchangeUnavailable("CONTRADICTORY_ORDER_RESPONSE")
         status = row.get("status")
-        if status == "NEW" and row["active"] and filled < intent.quantity_base:
+        if status in ("NEW","PARTIALLY_FILLED") and row["active"] and filled < intent.quantity_base and (status=="NEW" or filled>0):
             state = OrderState.PARTIAL if filled else OrderState.WORKING
         elif status in ("FILLED", "FINISHED") and not row["active"] and filled == intent.quantity_base:
             state = OrderState.FILLED

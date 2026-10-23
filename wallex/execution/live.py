@@ -16,7 +16,7 @@ from wallex.risk.pipeline import assess_risk_pipeline
 from wallex.risk import RiskReason
 from .admission import ReplayAdmission
 from .gateway import ReplayGateway, ExecutionRefused, GatewayResult, _UNRESOLVED
-from .models import Mode, OrderState, Side, amount, canonical_json, exact_sum, utc
+from .models import Mode, OrderState, Side, ExecutionRequest, amount, canonical_json, exact_sum, utc
 from .wallex_http import WallexExchange, BalanceEvidence
 
 REQUIRED_PROOFS = frozenset({"ACCOUNT_SCOPE", "TRADE_PERMISSION", "CREDIT_SPOT_ELIGIBILITY", "FEES",
@@ -33,6 +33,7 @@ class LiveEvidence:
     min_quantity: Decimal
     max_quantity: Decimal
     fee_asset: str
+    admission_context: object = None  # Explicit reviewed provider/account/risk evidence.
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class ProtectionPolicy:
     initial_stop: Decimal
     minimum_sell_price: Decimal
     maximum_base_fee_rate: Decimal
+    maximum_exit_wait_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,18 @@ class WallexGateway(ReplayGateway):
         self._approvals, self.last_blockers = {}, ()
         for record in ledger.records(transport.account_id):
             transport.bind(record.request.intent)
+
+    def submit(self, request):
+        # Returning an existing identical intent is READ ONLY, including after
+        # restart/partial fill; it must never require pretending the account is flat.
+        if (type(request) is not ExecutionRequest or request.intent.account_id!=self.transport.account_id
+                or request.intent.mode is not Mode.LIVE):raise ExecutionRefused("LIVE_ACCOUNT_BINDING_MISMATCH")
+        request=ExecutionRequest.from_dict(request.to_dict())
+        with self.ledger.writer(request.intent.account_id):
+            existing=self.ledger.existing(request)
+            if existing is not None:
+                return GatewayResult("existing_no_resubmission",self.ledger.receipt(request.intent.intent_id))
+        return super().submit(request)
 
     def readiness(self, request, evidence, *, entry=True, settlement=False):
         reasons=[]
@@ -116,8 +130,20 @@ class WallexGateway(ReplayGateway):
             if entry:
                 r=e.risk_inputs
                 assessed=assess_risk_pipeline(r)
-                if self.transport.actual_https and not assessed.executable_ready:
-                    reasons.append("RISK_PIPELINE_DIAGNOSTIC_ONLY_NOT_LIVE_AUTHORITY")
+                if self.transport.actual_https or evidence.admission_context is not None:
+                    from wallex.risk.live_admission import assess_live_admission
+                    live_risk=assess_live_admission(request,r,evidence.admission_context,now=now,actual_https=self.transport.actual_https)
+                    if not live_risk.risk_checks_passed:reasons.extend(live_risk.reasons)
+                    if evidence.admission_context is not None:
+                        if self.transport.actual_https:
+                            from wallex.risk.live_admission import verify_live_loss_history
+                            if not verify_live_loss_history(self.ledger,r,evidence.admission_context.authority):
+                                reasons.append("VERIFIED_PERSISTENT_EQUITY_LOSS_HISTORY_REQUIRED")
+                        venue=evidence.admission_context.venue
+                        if (e.fee_quote_rate!=max(venue.maker_rate,venue.taker_rate)
+                                or evidence.fee_asset!=evidence.admission_context.authority.fee_asset
+                                or (e.price_step,e.quantity_step,e.min_notional)!=(venue.price_step,venue.quantity_step,venue.minimum_notional)):
+                            reasons.append("LIVE_VENUE_FEE_OR_INSTRUMENT_EVIDENCE_MISMATCH")
                 if not assessed.local_conditions_satisfied or assessed.sizing is None or not assessed.sizing.calculation_valid:
                     reasons.append("CURRENT_RISK_PIPELINE_REJECTED")
                 elif quantity>Fraction(assessed.sizing.theoretical_quantity_upper_bound):
@@ -143,19 +169,22 @@ class WallexGateway(ReplayGateway):
             reasons.append("INVALID_OR_INCOMPLETE_LIVE_EVIDENCE")
         return tuple(dict.fromkeys(reasons))
 
-    def _owner(self, confirmation):
-        if confirmation != "AUTHORIZE WALLEX LIVE "+self.transport.account_id:
+    def _owner(self, confirmation, request, *, operation="SUBMIT"):
+        # Fingerprint binds account, side, quantity, price, fees/reservation and refs.
+        if confirmation != "AUTHORIZE WALLEX "+operation+" "+request.fingerprint:
             raise ExecutionRefused("EXPLICIT_LOCAL_OWNER_ACTIVATION_REQUIRED")
 
     def authorize_entry(self, request, evidence, protection, *, owner_confirmation=None):
         reasons=self.readiness(request,evidence)
         self.last_blockers=reasons
         if reasons:raise ExecutionRefused(",".join(reasons))
-        self._owner(owner_confirmation)
+        self._owner(owner_confirmation,request)
         self.transport.verify_scope()
         if (type(protection) is not ProtectionPolicy or request.intent.side is not Side.BUY
                 or request.intent.purpose!="entry"):
             raise ExecutionRefused("VALID_PROTECTIVE_EXIT_POLICY_REQUIRED")
+        if (type(protection.maximum_exit_wait_seconds) is not int or not 1<=protection.maximum_exit_wait_seconds<=300):
+            raise ExecutionRefused("EXPLICIT_BOUNDED_EXIT_TIMEOUT_REQUIRED")
         for value in (protection.initial_stop,protection.minimum_sell_price):amount(value)
         amount(protection.maximum_base_fee_rate,zero=True)
         if not 0<protection.minimum_sell_price<=protection.initial_stop<request.intent.price_quote_per_base or protection.maximum_base_fee_rate>=1:
@@ -180,7 +209,7 @@ class WallexGateway(ReplayGateway):
     def authorize_exit(self, entry_id, request, evidence, *, owner_confirmation=None):
         reasons=self.readiness(request,evidence,entry=False)
         if reasons:raise ExecutionRefused(",".join(reasons))
-        self._owner(owner_confirmation)
+        self._owner(owner_confirmation,request)
         self.transport.verify_scope()
         parent=self.ledger.get(entry_id)
         if parent is None or parent.state not in (OrderState.FILLED,OrderState.CANCELED):
@@ -203,6 +232,10 @@ class WallexGateway(ReplayGateway):
         consumed=Fraction(0)
         for record in self.ledger.records(i.account_id):
             if record.request.intent.side is Side.SELL:
+                belongs=any(event.kind=="live_exit_parent" and event.payload.get("entry_intent_id")==entry_id for event in self.ledger.events(record.request.intent.intent_id))
+                if not belongs:
+                    if record.reservation_held or record.state in _UNRESOLVED:raise ExecutionRefused("OTHER_EXIT_HELD_OR_UNCERTAIN")
+                    continue
                 if record.reservation_held or record.state in _UNRESOLVED:
                     raise ExecutionRefused("EXIT_ALREADY_HELD_OR_UNCERTAIN")
                 for f in self.ledger.fills(record.request.intent.intent_id):
@@ -213,6 +246,47 @@ class WallexGateway(ReplayGateway):
         if Fraction(request.reservation.amount)<required:
             raise ExecutionRefused("EXIT_BASE_FEE_RESERVATION_SHORTFALL")
         self._approvals[i.intent_id]=(request.fingerprint,deepcopy(evidence),None,entry_id)
+
+    def inspect_protection(self, entry_id, evidence):
+        """Read/reconcile outside this call; persist a fail-safe operational alert.
+
+        Never place or reprice an order automatically. A floor breach or aged
+        unfilled LIMIT blocks entries and demands explicit cancellation/exit review.
+        """
+        entry=self.ledger.get(entry_id)
+        if entry is None:raise ExecutionRefused("UNKNOWN_ENTRY_FOR_PROTECTION")
+        policy=self._policy(entry_id);now=self._now()
+        reasons=self.readiness(entry.request,evidence,entry=False,settlement=True)
+        if reasons:status="PROTECTION_EVIDENCE_BLOCKED"
+        elif entry.state in _UNRESOLVED or entry.state is OrderState.PLANNED:
+            status="RECONCILE_ENTRY_BEFORE_PROTECTION"
+        else:
+            linked=[]
+            for record in self.ledger.records(entry.request.intent.account_id):
+                if any(e.kind=="live_exit_parent" and e.payload.get("entry_intent_id")==entry_id for e in self.ledger.events(record.request.intent.intent_id)):
+                    linked.append(record)
+            active=[r for r in linked if r.state in _UNRESOLVED or r.state in (OrderState.WORKING,OrderState.PARTIAL)]
+            timeout=policy.get("maximum_exit_wait_seconds")
+            if type(timeout) is not int or not 1<=timeout<=300:
+                status="EXIT_TIMEOUT_POLICY_MISSING"
+            elif active:
+                exit=active[-1]
+                if exit.state in (OrderState.UNKNOWN,OrderState.SUBMITTING,OrderState.CANCEL_PENDING,OrderState.RECONCILING):
+                    status="EXIT_OUTCOME_UNKNOWN_RECOVERY_REQUIRED"
+                elif (now-exit.request.intent.created_at).total_seconds()>=timeout:
+                    status="EXIT_TIMEOUT_CANCEL_REPRICE_REQUIRES_EXACT_APPROVAL"
+                else:status="PROTECTIVE_LIMIT_WORKING_FILL_NOT_GUARANTEED"
+            elif any(r.state is OrderState.FILLED for r in linked):status="RECONCILE_SETTLEMENT_BEFORE_RELEASING_EXPOSURE"
+            elif evidence.checks.bid<Decimal(policy["minimum_sell_price"]):status="GAP_BELOW_APPROVED_FLOOR_ESCALATE_NO_GUARANTEED_STOP"
+            elif evidence.checks.bid<=Decimal(policy["initial_stop"]):
+                status="CANCEL_OPEN_ENTRY_BEFORE_PROTECTIVE_SELL" if entry.state in (OrderState.WORKING,OrderState.PARTIAL) else "PROTECTIVE_SELL_REQUIRES_EXACT_APPROVAL"
+            else:status="WAITING_FOR_STOP"
+        if status!="WAITING_FOR_STOP":self.stop_new_entries=True
+        report={"status":status,"reasons":list(reasons),"action":"NO_TRADE","executable_ready":False}
+        i=entry.request.intent
+        self.ledger.record_event("live_protection_inspected",account_id=i.account_id,run_id=i.run_id,trace_id=i.trace_id,
+            at=now,intent_id=entry_id,payload=report)
+        return report
 
     def _validate_submission(self, request):
         approval=self._approvals.get(request.intent.intent_id)
@@ -238,10 +312,10 @@ class WallexGateway(ReplayGateway):
             self.ledger.record_event("live_protection_policy",account_id=request.intent.account_id,
                 run_id=request.intent.run_id,trace_id=request.intent.trace_id,at=self._now(),intent_id=request.intent.intent_id,
                 payload={"initial_stop":policy.initial_stop,"minimum_sell_price":policy.minimum_sell_price,
-                    "maximum_base_fee_rate":policy.maximum_base_fee_rate,"before":approval[1].balances})
+                    "maximum_base_fee_rate":policy.maximum_base_fee_rate,"maximum_exit_wait_seconds":policy.maximum_exit_wait_seconds,"before":approval[1].balances})
         else:
             parent=approval[3]
-            self.authorize_exit(parent,request,approval[1],owner_confirmation="AUTHORIZE WALLEX LIVE "+self.transport.account_id)
+            self.authorize_exit(parent,request,approval[1],owner_confirmation="AUTHORIZE WALLEX SUBMIT "+request.fingerprint)
             if any(r.request.intent.intent_id!=parent and (r.reservation_held or r.state in _UNRESOLVED) for r in records):
                 raise ExecutionRefused("OTHER_HELD_EXPOSURE")
             self.ledger.record_event("live_exit_parent",account_id=request.intent.account_id,
@@ -253,10 +327,10 @@ class WallexGateway(ReplayGateway):
         self.transport._permit=_WritePermit(request.intent.account_id,request.intent.client_id,"SUBMIT",self._now()+timedelta(seconds=5))
 
     def cancel(self, intent_id, *, evidence=None, owner_confirmation=None):
-        self._owner(owner_confirmation)
-        self.transport.verify_scope()
         record=self.ledger.get(intent_id)
         if record is None:raise ExecutionRefused("UNKNOWN_INTENT")
+        self._owner(owner_confirmation,record.request,operation="CANCEL")
+        self.transport.verify_scope()
         reasons=self.readiness(record.request,evidence,entry=False,settlement=True)
         if reasons:raise ExecutionRefused(",".join(reasons))
         self.transport._permit=_WritePermit(record.request.intent.account_id,record.request.intent.client_id,"CANCEL",self._now()+timedelta(seconds=5))
@@ -264,17 +338,24 @@ class WallexGateway(ReplayGateway):
 
     def _uncertain(self, record, reason):
         code=self.transport.last_failure_code
-        if code:
+        if code or self.transport.last_http_status is not None:
             self.ledger.record_event("wallex_operation_blocked",account_id=record.request.intent.account_id,
                 run_id=record.request.intent.run_id,trace_id=record.request.intent.trace_id,at=self._now(),
-                intent_id=record.request.intent.intent_id,payload={"reason":code,"http_status":self.transport.last_http_status})
+                intent_id=record.request.intent.intent_id,payload={"reason":code or "RESPONSE_NOT_RECONCILABLE","http_status":self.transport.last_http_status,"raw_sha256":self.transport.last_hash})
         return super()._uncertain(record,reason)
 
     def _accept(self, record, observation):
         result=super()._accept(record,observation)
+        if result.state is OrderState.CANCELED and record.request.intent.side is Side.SELL:
+            links=[event.payload.get("entry_intent_id") for event in self.ledger.events(record.request.intent.intent_id) if event.kind=="live_exit_parent"]
+            if not links or len(set(links))!=1:raise ExecutionRefused("EXIT_PARENT_NOT_DURABLE")
+            # Also runs on READ-only reconciliation after a crash between the
+            # durable CANCELED observation and residual-reservation release.
+            self.ledger.release_canceled_exit(record.request.intent.intent_id,links[0],at=self._now())
+            result=self.ledger.receipt(record.request.intent.intent_id)
         self.ledger.record_event("wallex_response_hash",account_id=record.request.intent.account_id,
             run_id=record.request.intent.run_id,trace_id=record.request.intent.trace_id,at=self._now(),
-            intent_id=record.request.intent.intent_id,payload={"raw_sha256":self.transport.last_hash,
+            intent_id=record.request.intent.intent_id,payload={"raw_sha256":self.transport.last_hash,"http_status":self.transport.last_http_status,
                 "transport":"HTTPS" if self.transport.actual_https else "HTTP_MOCK"})
         return result
 
@@ -299,8 +380,11 @@ class WallexGateway(ReplayGateway):
             after=self.transport.balances()
             before=self._policy(entry_id)["before"]
             before_assets={r[0]:tuple(Decimal(v) for v in r[1:]) for r in before["assets"]}
+            children=[record for record in self.ledger.records(i.account_id) if any(event.kind=="live_exit_parent" and event.payload.get("entry_intent_id")==entry_id for event in self.ledger.events(record.request.intent.intent_id))]
+            if any(record.state not in (OrderState.FILLED,OrderState.CANCELED) for record in children):
+                raise ExecutionRefused("UNRESOLVED_EXIT_BLOCKS_SETTLEMENT")
             deltas={i.base_asset:Fraction(0),i.quote_asset:Fraction(0)}
-            for record in (entry,exit):
+            for record in (entry,*children):
                 buy=record.request.intent.side is Side.BUY
                 for f in self.ledger.fills(record.request.intent.intent_id):
                     if f.fee_amount is None or f.fee_asset not in deltas:raise ExecutionRefused("FEES_UNVERIFIED")
@@ -316,5 +400,5 @@ class WallexGateway(ReplayGateway):
             report={"status":"MOCK_SETTLED" if not self.transport.actual_https else "SCOPED_BALANCE_RECONCILED",
                 "quote_asset":i.quote_asset,"base_delta":"0","quote_delta_fraction":str(deltas[i.quote_asset]),
                 "balance_raw_sha256":after.raw_sha256,"action":"NO_TRADE","executable_ready":False}
-            self.ledger.release_live_round_trip((entry_id,exit_id),at=self._now(),report=report)
+            self.ledger.release_live_round_trip(tuple([entry_id]+[record.request.intent.intent_id for record in children]),at=self._now(),report=report)
             return report

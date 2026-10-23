@@ -455,7 +455,7 @@ class Ledger:
 
     def release_live_round_trip(self, intent_ids, *, at, report):
         """Called after exact external settlement reconciliation under writer lock."""
-        if self.mode is not Mode.LIVE or type(intent_ids) is not tuple or len(intent_ids)!=2:
+        if self.mode is not Mode.LIVE or type(intent_ids) is not tuple or not 2<=len(intent_ids)<=100 or len(set(intent_ids))!=len(intent_ids):
             raise StateConflict("Explicit live round trip required.")
         with self._transaction() as db:
             records=[]
@@ -471,3 +471,25 @@ class Ledger:
                 db.execute("UPDATE intents SET reservation_held=0,version=version+1 WHERE intent_id=?",(intent.intent_id,))
                 self._event(db,"live_settlement_reconciled",account_id=intent.account_id,run_id=intent.run_id,
                     trace_id=intent.trace_id,at=at,intent_id=intent.intent_id,payload=report)
+
+    def release_canceled_exit(self, exit_id, parent_id, *, at):
+        """Release only a confirmed canceled SELL's residual hold.
+
+        The parent entry reservation remains held until ALL child fills settle.
+        Executed child fills stay immutable and count against the next exit.
+        """
+        if self.mode is not Mode.LIVE:raise StateConflict("Live exit ledger required.")
+        with self._transaction() as db:
+            rows=[db.execute("SELECT * FROM intents WHERE intent_id=?",(identifier(key),)).fetchone() for key in (exit_id,parent_id)]
+            if any(row is None for row in rows):raise StateConflict("Missing exit or parent.")
+            exit,parent=(self._record(row) for row in rows)
+            if (exit.state is not OrderState.CANCELED or exit.request.intent.side is not Side.SELL
+                    or parent.request.intent.side is not Side.BUY
+                    or exit.request.intent.account_id!=parent.request.intent.account_id):
+                raise StateConflict("Canceled exit with held matching parent required.")
+            if not exit.reservation_held:return
+            if not parent.reservation_held:raise StateConflict("Parent exposure must remain held.")
+            db.execute("UPDATE intents SET reservation_held=0,version=version+1 WHERE intent_id=?",(exit_id,))
+            i=exit.request.intent
+            self._event(db,"live_canceled_exit_residual_released",account_id=i.account_id,run_id=i.run_id,
+                trace_id=i.trace_id,at=at,intent_id=exit_id,payload={"parent_entry":parent_id,"parent_exposure_still_held":True})

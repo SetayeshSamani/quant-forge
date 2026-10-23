@@ -19,80 +19,7 @@ from .live import WallexGateway,LiveEvidence,ProtectionPolicy,REQUIRED_PROOFS
 from .gateway import ExecutionRefused
 from .wallex_http import WallexExchange,WireResponse,HTTPSExchangeTransport,ExchangeUnavailable,WireRequest
 
-D=Decimal
-KEY='synthetic-execution-key-never-live'
-ACCOUNT='synthetic_account'
-OWNER='AUTHORIZE WALLEX LIVE '+ACCOUNT
-
-
-def setup_inputs():
-    risk=risk_fixture()
-    risk.frame.symbol='BTCTMN';risk.frame.base_asset='BTC';risk.frame.quote_asset='TMN'
-    for bar in (*risk.frame.candles_15m,*risk.frame.candles_1h):bar.symbol='BTCTMN'
-    risk=replace(risk,account_id=ACCOUNT,quote_asset='TMN',worst_case_extra_loss_per_unit=D(1),
-        portfolio_state=replace(risk.portfolio_state,account_id=ACCOUNT,quote_asset='TMN'),
-        loss_state=replace(risk.loss_state,quote_asset='TMN'))
-    now=datetime.fromtimestamp(risk.frame.as_of,timezone.utc)
-    request=synthetic_request(account_id=ACCOUNT)
-    request=replace(request,intent=replace(request.intent,intent_id='live_buy',client_id='BUY_1',symbol='BTCTMN',
-        base_asset='BTC',quote_asset='TMN',quantity_base=D('.5'),price_quote_per_base=D(110),
-        created_at=now,expires_at=now+timedelta(seconds=20),mode=Mode.LIVE),
-        reservation=Reservation('TMN',D('55.1'),D(1000)),evidence_kind='live_verified')
-    checks=ReplayAdmission(risk,True,True,True,'BTCTMN','BTC','TMN',D(108),D(109),now,30,True,
-        D(1),D('.01'),D(1),D(1000),D('.001'),(),True)
-    policy=ProtectionPolicy(D("97.6"),D(97),D(0))
-    return request,checks,policy,now
-
-
-class HttpTape:
-    def __init__(self,now):
-        self.now=now;self.orders={};self.requests=[];self.fault=None;self.status=200;self.cancel_fault=False
-        self.base=D(0);self.quote=D(10000)
-
-    def response(self,result,status=200):
-        return WireResponse(status,json.dumps({'success':True,'result':result}).encode())
-
-    def send(self,request):
-        self.requests.append(request)
-        assert request.headers['x-api-key']==KEY
-        if request.path!='/sub-accounts':assert request.headers['sub-account-client-id']==ACCOUNT
-        if request.path=='/sub-accounts':
-            return WireResponse(200,json.dumps({'success':True,'result':[{'clientId':ACCOUNT,'userId':'7','type':'prop','isActive':True,'isSuspend':False}], 'result_info':{'page':1,'count':1,'total_count':1}}).encode())
-        if self.status!=200:return WireResponse(self.status,b'{"success":false,"result":{"error_code":1006}}')
-        if request.method=='POST':
-            body=json.loads(request.body);cid=body['client_id']
-            assert cid not in self.orders,'DUPLICATE POST'
-            self.orders[cid]={'clientOrderId':cid,'symbol':body['symbol'],'side':body['side'],'type':'LIMIT',
-                'origQty':body['quantity'],'price':body['price'],'executedQty':'0','active':True,'status':'NEW','fills':[]}
-            if self.fault:
-                self.fill(cid,D('.25'));fault,self.fault=self.fault,None
-                if fault=='crash':raise KeyboardInterrupt()
-                raise TimeoutError()
-            return self.response(self.orders[cid],201)
-        if request.method=='DELETE':
-            cid=request.path.split('clientOrderId=')[1]
-            if self.cancel_fault:raise TimeoutError()
-            self.orders[cid]['status']='CANCELED';self.orders[cid]['active']=False
-            return self.response(self.orders[cid])
-        if request.path.startswith('/v1/account/orders/'):
-            cid=request.path.rsplit('/',1)[1]
-            return self.response(deepcopy(self.orders[cid])) if cid in self.orders else WireResponse(404,b'{}')
-        if request.path.endswith('/balances-detail'):
-            return self.response({asset:{'symbol':asset,'total':str(v),'available':str(v),'freeze':'0'} for asset,v in (('BTC',self.base),('TMN',self.quote))})
-        if '/openOrders' in request.path:
-            return self.response({'orders':[deepcopy(o) for o in self.orders.values() if o['active']]})
-        if '/trades' in request.path:
-            return self.response({'AccountLatestTrades':[deepcopy(f) for o in self.orders.values() for f in o['fills']]})
-        raise AssertionError('Unexpected endpoint')
-
-    def fill(self,cid,quantity):
-        row=self.orders[cid];price=D(row['price']);fee=quantity*price*D('.001');buy=row['side']=='BUY'
-        row['fills'].append({'symbol':row['symbol'],'quantity':str(quantity),'price':str(price),'sum':str(quantity*price),
-            'fee':str(fee),'feeAsset':'TMN','isBuyer':buy,'timestamp':self.now.isoformat()})
-        total=D(row['executedQty'])+quantity;row['executedQty']=str(total)
-        row['active']=total<D(row['origQty']);row['status']='NEW' if row['active'] else 'FILLED'
-        self.base+=quantity if buy else -quantity
-        self.quote+=(-quantity*price-fee) if buy else quantity*price-fee
+from .synthetic import D,KEY,ACCOUNT,owner,setup_inputs,HttpTape
 
 
 class WallexLiveTests(unittest.TestCase):
@@ -113,7 +40,11 @@ class WallexLiveTests(unittest.TestCase):
             purpose='risk_reducing_exit',quantity_base=quantity,price_quote_per_base=D(97)),
             reservation=Reservation('BTC',quantity,quantity))
         e=self.evidence(exchange,replace(checks,bid=D(97),ask=D(98)))
-        gateway.authorize_exit(request.intent.intent_id,sell,e,owner_confirmation=OWNER)
+        self.assertEqual(gateway.inspect_protection(request.intent.intent_id,e)['status'],'PROTECTIVE_SELL_REQUIRES_EXACT_APPROVAL')
+        gap=replace(e,checks=replace(e.checks,bid=D(90),ask=D(91)))
+        self.assertEqual(gateway.inspect_protection(request.intent.intent_id,gap)['status'],'GAP_BELOW_APPROVED_FLOOR_ESCALATE_NO_GUARANTEED_STOP')
+        self.assertTrue(gateway.stop_new_entries)
+        gateway.authorize_exit(request.intent.intent_id,sell,e,owner_confirmation=owner(sell))
         self.assertEqual(gateway.submit(sell).receipt.state,OrderState.WORKING)
         tape.fill('SELL_1',quantity)
         self.assertEqual(gateway.reconcile('live_sell').state,OrderState.FILLED)
@@ -131,7 +62,7 @@ class WallexLiveTests(unittest.TestCase):
             e=self.evidence(exchange,checks)
             self.assertEqual(gateway.readiness(request,e),())
             with self.assertRaises(ExecutionRefused):gateway.submit(request)
-            gateway.authorize_entry(request,e,policy,owner_confirmation=OWNER)
+            gateway.authorize_entry(request,e,policy,owner_confirmation=owner(request))
             self.assertEqual(gateway.submit(request).receipt.state,OrderState.WORKING)
             tape.fill('BUY_1',D('.25'))
             self.assertEqual(gateway.reconcile('live_buy').state,OrderState.PARTIAL)
@@ -151,7 +82,7 @@ class WallexLiveTests(unittest.TestCase):
         for fault in ('timeout','crash'):
             with self.subTest(fault=fault),TemporaryDirectory() as directory:
                 request,checks,policy,now,tape,exchange,ledger,gateway=self.make(directory)
-                e=self.evidence(exchange,checks);gateway.authorize_entry(request,e,policy,owner_confirmation=OWNER)
+                e=self.evidence(exchange,checks);gateway.authorize_entry(request,e,policy,owner_confirmation=owner(request))
                 tape.fault=fault
                 if fault=='crash':
                     with self.assertRaises(KeyboardInterrupt):gateway.submit(request)
@@ -161,12 +92,31 @@ class WallexLiveTests(unittest.TestCase):
                 restarted=WallexGateway(Ledger(ledger.path,mode=Mode.LIVE),new_exchange,clock=lambda:now)
                 recovered=restarted.recover_account(ACCOUNT,run_id='recover',trace_id='recover')
                 self.assertEqual(recovered[0].state,OrderState.PARTIAL)
-                restarted.authorize_entry(request,e,policy,owner_confirmation=OWNER)
                 self.assertEqual(restarted.submit(request).disposition,'existing_no_resubmission')
                 self.assertEqual(len([r for r in tape.requests if r.method=='POST']),1)
-                self.assertEqual(restarted.cancel('live_buy',evidence=self.evidence(new_exchange,checks),owner_confirmation=OWNER).state,OrderState.CANCELED)
+                self.assertEqual(restarted.cancel('live_buy',evidence=self.evidence(new_exchange,checks),owner_confirmation=owner(request,'CANCEL')).state,OrderState.CANCELED)
                 self.close_position(request,checks,now,tape,new_exchange,ledger,restarted)
                 self.assertEqual(tape.quote,D('9996.69825'))
+
+        # Crash after CANCELED is committed but before residual hold release.
+        with TemporaryDirectory() as directory:
+            request,checks,policy,now,tape,exchange,ledger,gateway=self.make(directory)
+            gateway.authorize_entry(request,self.evidence(exchange,checks),policy,owner_confirmation=owner(request))
+            gateway.submit(request);tape.fill('BUY_1',D('.5'));gateway.reconcile('live_buy')
+            sell=replace(request,intent=replace(request.intent,intent_id='live_sell',client_id='SELL_1',side=Side.SELL,
+                purpose='risk_reducing_exit',price_quote_per_base=D(97)),reservation=Reservation('BTC',D('.5'),D('.5')))
+            exit_checks=replace(checks,bid=D(97),ask=D(98));e=self.evidence(exchange,exit_checks)
+            gateway.authorize_exit('live_buy',sell,e,owner_confirmation=owner(sell));gateway.submit(sell)
+            tape.fill('SELL_1',D('.25'));gateway.reconcile('live_sell')
+            with patch.object(ledger,'release_canceled_exit',side_effect=KeyboardInterrupt()):
+                with self.assertRaises(KeyboardInterrupt):gateway.cancel('live_sell',evidence=self.evidence(exchange,exit_checks),owner_confirmation=owner(sell,'CANCEL'))
+            self.assertTrue(ledger.get('live_sell').reservation_held)
+            fresh=WallexExchange(api_key=KEY,account_id=ACCOUNT,owner_user_id=7,transport=tape,clock=lambda:now)
+            restarted=WallexGateway(Ledger(ledger.path,mode=Mode.LIVE),fresh,clock=lambda:now)
+            restarted.recover_account(ACCOUNT,run_id='cancel-restart',trace_id='cancel-restart')
+            self.assertFalse(ledger.get('live_sell').reservation_held)
+            self.assertTrue(ledger.get('live_buy').reservation_held)
+            self.assertEqual(len([r for r in tape.requests if r.method=='DELETE']),1)
 
     def test_missing_proofs_owner_scope_risk_limits_and_real_transport_reject_mock(self):
         with TemporaryDirectory() as directory:
@@ -178,15 +128,15 @@ class WallexLiveTests(unittest.TestCase):
                 replace(e,checks=replace(checks,risk_inputs=None)),replace(e,min_quantity=D(1)),replace(e,max_quantity=D('.1')),replace(e,fee_asset='IRR'),replace(e,balances=replace(e.balances,account_id='wrong')),
                 replace(e,checks=replace(checks,observed_at=now-timedelta(seconds=31)))]
             for index,bad in enumerate(cases):
-                with self.subTest(index=index),self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,bad,policy,owner_confirmation=OWNER)
+                with self.subTest(index=index),self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,bad,policy,owner_confirmation=owner(request))
             with self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,e,policy)
-            with self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,e,replace(policy,initial_stop=D(100)),owner_confirmation=OWNER)
-            with self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,e,replace(policy,minimum_sell_price=D(90)),owner_confirmation=OWNER)
+            with self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,e,replace(policy,initial_stop=D(100)),owner_confirmation=owner(request))
+            with self.assertRaises(ExecutionRefused):gateway.authorize_entry(request,e,replace(policy,minimum_sell_price=D(90)),owner_confirmation=owner(request))
             with self.assertRaises(ExchangeUnavailable):exchange.submit(request.intent)
             real=WallexExchange(api_key=KEY,account_id=ACCOUNT,owner_user_id=7,clock=lambda:now)
             real_gate=WallexGateway(ledger,real,clock=lambda:now)
             self.assertIn('MOCK_OR_UNVERIFIED_EVIDENCE_ON_REAL_TRANSPORT',real_gate.readiness(request,e))
-            self.assertIn('RISK_PIPELINE_DIAGNOSTIC_ONLY_NOT_LIVE_AUTHORITY',real_gate.readiness(request,replace(e,origin='LIVE_VERIFIED')))
+            self.assertIn('EXPLICIT_LIVE_RISK_CONTEXT_REQUIRED',real_gate.readiness(request,replace(e,origin='LIVE_VERIFIED')))
             self.assertFalse(any(r.method in ('POST','DELETE') for r in tape.requests))
             with self.assertRaises(LedgerError):Ledger(ledger.path) # no silent live/replay migration.
 
@@ -194,7 +144,7 @@ class WallexLiveTests(unittest.TestCase):
         for status in (401,403,404,429,500,422):
             with self.subTest(status=status),TemporaryDirectory() as directory:
                 request,checks,policy,now,tape,exchange,ledger,gateway=self.make(directory)
-                gateway.authorize_entry(request,self.evidence(exchange,checks),policy,owner_confirmation=OWNER)
+                gateway.authorize_entry(request,self.evidence(exchange,checks),policy,owner_confirmation=owner(request))
                 # Fail only POST; admission GET remains working.
                 original=tape.send
                 def send(wire):
@@ -205,13 +155,13 @@ class WallexLiveTests(unittest.TestCase):
         for case in ('fee','quantity','identity','cancel','balance'):
             with self.subTest(case=case),TemporaryDirectory() as directory:
                 request,checks,policy,now,tape,exchange,ledger,gateway=self.make(directory)
-                gateway.authorize_entry(request,self.evidence(exchange,checks),policy,owner_confirmation=OWNER)
+                gateway.authorize_entry(request,self.evidence(exchange,checks),policy,owner_confirmation=owner(request))
                 gateway.submit(request);tape.fill('BUY_1',D('.25'))
                 if case=='cancel':
                     gateway.reconcile('live_buy');tape.cancel_fault=True
-                    self.assertEqual(gateway.cancel('live_buy',evidence=self.evidence(exchange,checks),owner_confirmation=OWNER).state,OrderState.UNKNOWN)
+                    self.assertEqual(gateway.cancel('live_buy',evidence=self.evidence(exchange,checks),owner_confirmation=owner(request,'CANCEL')).state,OrderState.UNKNOWN)
                 elif case=='balance':
-                    gateway.reconcile('live_buy');gateway.cancel('live_buy',evidence=self.evidence(exchange,checks),owner_confirmation=OWNER)
+                    gateway.reconcile('live_buy');gateway.cancel('live_buy',evidence=self.evidence(exchange,checks),owner_confirmation=owner(request,'CANCEL'))
                     tape.quote+=D(1)
                     with self.assertRaises(ExecutionRefused):self.close_position(request,checks,now,tape,exchange,ledger,gateway)
                 else:
@@ -234,7 +184,7 @@ class WallexLiveTests(unittest.TestCase):
                 self.requests.append((wire,timeout));return Reply(b'{"success":true,"result":{}}')
         opener=Opener()
         for method,path,body in (('POST','/v1/account/orders',b'{"client_id":"BUY_1"}'),('GET','/v1/account/orders/BUY_1',None),
-                ('DELETE','/v1/account/orders?clientOrderId=BUY_1',None)):
+                ('DELETE','/v1/account/orders/BUY_1',None)):
             with self.subTest(method=method),patch('wallex.execution.wallex_http.build_opener',return_value=opener):
                 from .live import _WritePermit
                 permit=None if method=='GET' else _WritePermit(ACCOUNT,'BUY_1','SUBMIT' if method=='POST' else 'CANCEL',datetime.now(timezone.utc)+timedelta(seconds=5))
