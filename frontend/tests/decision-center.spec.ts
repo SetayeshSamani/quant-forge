@@ -133,3 +133,27 @@ test("decision deep link, themes and responsive navigation reuse the shell", asy
   await page.getByRole("button", { name: "پوسته تیره", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
+
+
+test("historical owner-reported summary stays separate from DEMO and authorization", async ({ page }) => {
+  await page.goto("/#decision-center");
+  const historical = page.getByRole("region", { name: "ارزیابی تاریخی TP-1 · BTCTMN", exact: true });
+  await expect(historical).toContainText("HISTORICAL / OFFLINE");
+  await historical.locator("summary").click();
+  const record = JSON.parse(await historical.locator("pre").innerText());
+  expect(record).toMatchObject({
+    source: "OWNER_REPORTED_HISTORICAL_RESULT",
+    mode: "HISTORICAL_OFFLINE", symbol: "BTCTMN",
+    h1_candles: 264, m15_candles: 24, evaluated_steps: 4,
+    eligible_steps: 0, errors: 0, action: "NO_TRADE", executable_ready: false,
+    original_artifact_included: false, dataset_sha256: null, range_utc: null, cutoff_utc: null,
+    account_balances: "UNVERIFIED", credit_evidence: "UNVERIFIED", fees: "UNVERIFIED",
+    quote_freshness: "UNVERIFIED", execution_permissions: "UNVERIFIED",
+  });
+  await expect(page.getByRole("note")).toContainText("DEMO");
+  await expect(page.locator(".trade-disabled")).toBeDisabled();
+  await page.getByRole("button", { name: "پوسته روشن", exact: true }).click();
+  await expect(historical).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
