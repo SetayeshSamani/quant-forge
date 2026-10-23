@@ -20,10 +20,10 @@ def arguments():
             "--plan-type", binding.plan_type, "--expected-plan-status", "SYNTHETIC_ACTIVE"]
 
 
-def invoke(argv=None, payloads=None, *, tty=True, prompt=None, now=1800000):
+def invoke(argv=None, payloads=None, *, tty=True, prompt=None, now=1800000, replies=None):
     if payloads is None:
         _, _, payloads, _ = setup_fixture()
-    transport = FakeTransport([HttpReply(200, json.dumps(p).encode()) for p in payloads])
+    transport = FakeTransport(replies if replies is not None else [HttpReply(200, json.dumps(p).encode()) for p in payloads])
     out, err = StringIO(), StringIO()
     with redirect_stdout(out), redirect_stderr(err), \
             patch.object(cli.sys.stdin, "isatty", return_value=tty), \
@@ -183,6 +183,40 @@ class CreditPreflightTests(unittest.TestCase):
                     hidden.assert_not_called()
                     factory.assert_not_called()
                 self.assert_safe(report, err)
+
+
+    def test_prop_diagnostic_is_opt_in_redacted_two_gets_and_never_approval(self):
+        for status, expected, next_step in ((200, "PROP_PACKAGE_READABLE", "NONE_DIAGNOSTIC_ONLY"),
+                                          (401, "PROP_PACKAGE_AUTH_REJECTED", "ASK_WALLEX_PROP_ENDPOINT_READ_AUTHORIZATION"),
+                                          (403, "PROP_PACKAGE_ACCESS_DENIED", "ASK_WALLEX_PROP_ENDPOINT_READ_AUTHORIZATION")):
+            _, _, payloads, _ = setup_fixture()
+            payloads[0]["message"] = FAKE
+            replies = [HttpReply(200, json.dumps(payloads[0]).encode()),
+                       HttpReply(status, json.dumps(payloads[1]).encode() if status == 200 else FAKE.encode())]
+            with self.subTest(status=status):
+                code, report, err, transport, hidden, _ = invoke(arguments() + ["--diagnose-prop"], replies=replies)
+                self.assertEqual(code, 0 if status == 200 else 1)
+                hidden.assert_called_once()
+                self.assertEqual(report["diagnostic_classification"], expected)
+                self.assertEqual(report["next_step"], next_step)
+                self.assertEqual(report["http_status"], status)
+                self.assertEqual(report["account_type"], "UNVERIFIED")
+                self.assertEqual(report["credit_plan_status"], "UNVERIFIED")
+                self.assertEqual(report["data_availability"]["balances"], "NOT_REQUESTED")
+                self.assertEqual([request.path for request in transport.calls], list(GET_PATHS[:2]))
+                self.assert_safe(report, err)
+                for forbidden in ("headers", "packageDetail", "dailyFee", "userPackageDetail"):
+                    self.assertNotIn(forbidden, json.dumps(report))
+        for argv, tty, reason in ((arguments()[1:] + ["--diagnose-prop"], True, "INVALID_ARGUMENTS"),
+                                  (arguments() + ["--diagnose-prop", "--diagnose-scope"], True, "INVALID_ARGUMENTS"),
+                                  (arguments() + ["--diagnose-prop"], False, "INTERACTIVE_TERMINAL_REQUIRED")):
+            with self.subTest(reason=reason):
+                _, report, err, transport, hidden, _ = invoke(argv, tty=tty)
+                self.assertEqual(report["validation_failures"], [reason])
+                hidden.assert_not_called()
+                self.assertEqual(transport.calls, [])
+                self.assert_safe(report, err)
+
 
 
 if __name__ == "__main__":

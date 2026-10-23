@@ -167,3 +167,29 @@ or proven credential scope. Balance arithmetic, expiry, fees and credit-risk
 semantics remain unassessed here; the existing offline adapter requires separately
 agreed evidence/semantics. `NO_TRADE` and `executable_ready=False` are permanent.
 This command is not run against Wallex during development; tests use mocks only.
+
+
+### P0 prop endpoint diagnostic (manual only)
+
+Add `--diagnose-prop` to the existing opt-in preflight command. It is mutually
+exclusive with `--diagnose-scope` and requests only discovery and active package,
+never balances. The owner runs it locally; no real call is made by tests or Codex.
+
+```powershell
+python -B -m wallex.infra.credit_preflight --connect --diagnose-prop `
+  --sub-account-client-id CREDIT_CLIENT_ID --owner-user-id OWNER_ID `
+  --package-id PACKAGE_ID --user-package-id USER_PACKAGE_ID `
+  --currency TMN --plan-type PLAN_TYPE --expected-plan-status PLAN_STATUS
+```
+
+Replace identifiers, currency and labels with independently verified local values;
+never guess or put a key in arguments/files/environment. Existing hidden `getpass`
+and interactive-terminal checks apply. Output contains only categorical identity
+checks, endpoint/status, classification and a fixed next-step code. HTTP 200 with
+invalid evidence remains a failure. HTTP 401/403 do not imply an absent package;
+404 semantics remain unspecified. Diagnostic success means readable, unapproved
+evidence only; it never verifies financial status, key scope or execution.
+Inactive/suspended discovery stops before package/balance requests. See the
+[auth review](../../docs/WALLEX_CREDIT_API_AUDIT.md#prop-preflight-authentication-review--2026-10-23)
+for the exact provider clarification needed. No retries, auth bypass or account
+fallback are added. Normal three-GET preflight and all risk guards remain enabled.

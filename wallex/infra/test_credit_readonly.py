@@ -256,5 +256,73 @@ class CreditReadOnlyTests(unittest.TestCase):
         with self.assertRaises((TypeError,ValueError)):replace(request,method='POST')
 
 
+    def test_prop_diagnostic_distinguishes_auth_absence_and_malformed_evidence(self):
+        binding, _, _, config = setup_fixture()
+        cases = (("ok", 200, None, "PROP_PACKAGE_READABLE"),
+                 ("401", 401, R.AUTHENTICATION_FAILED, "PROP_PACKAGE_AUTH_REJECTED"),
+                 ("403", 403, R.FORBIDDEN, "PROP_PACKAGE_ACCESS_DENIED"),
+                 ("404", 404, R.NOT_FOUND, "PROP_PACKAGE_HTTP_NOT_FOUND"),
+                 ("null", 200, R.PACKAGE_EVIDENCE_ABSENT, "ACTIVE_PACKAGE_EVIDENCE_ABSENT"),
+                 ("empty", 200, R.PACKAGE_EVIDENCE_ABSENT, "ACTIVE_PACKAGE_EVIDENCE_ABSENT"),
+                 ("both-null", 200, R.PACKAGE_EVIDENCE_ABSENT, "ACTIVE_PACKAGE_EVIDENCE_ABSENT"),
+                 ("malformed", 200, R.INVALID_RESPONSE, "INVALID_RESPONSE"),
+                 ("reflected", 200, R.SENSITIVE_RESPONSE, "SENSITIVE_RESPONSE"))
+        for case, status, reason, category in cases:
+            _, _, payloads, _ = setup_fixture()
+            if case == "null": payloads[1]["result"] = None
+            elif case == "empty": payloads[1]["result"] = {}
+            elif case == "both-null": payloads[1]["result"] = dict(packageDetail=None, userPackageDetail=None)
+            elif case == "reflected": payloads[1]["result"]["userPackageDetail"]["status"] = FAKE
+            body = b'not-json' if case == "malformed" else json.dumps(payloads[1]).encode()
+            if status != 200: body = FAKE.encode()  # Provider error bodies must never be retained.
+            replies = [reader.HttpReply(200, json.dumps(payloads[0]).encode()), reader.HttpReply(status, body)]
+            with self.subTest(case=case):
+                client, transport, _, _ = mock_client(payloads, replies=replies)
+                result = client.fetch(binding, config=config, diagnose_prop=True)
+                self.assert_failed(result, reason or R.PROP_DIAGNOSED)
+                self.assertEqual(result.diagnostic_classification, category)
+                self.assertEqual(result.http_status, status)
+                self.assertEqual(result.scope_checks["account_type"], "prop")
+                self.assertTrue(result.scope_checks["user_id_match"])
+                self.assertEqual([request.path for request in transport.calls], list(reader.GET_PATHS[:2]))
+                self.assertTrue(all(request.method == "GET" and request.headers["sub-account-client-id"] == binding.sub_account_client_id
+                                    and request.headers["x-api-key"] == FAKE for request in transport.calls))
+                if reason: self.assertEqual(result.failed_endpoint, reader.GET_PATHS[1])
+
+    def test_prop_identity_mismatches_block_before_further_reads(self):
+        binding, _, _, config = setup_fixture()
+        cases = (("account", "ACCOUNT_IDENTITY_NOT_FOUND", 1), ("owner", "OWNER_IDENTITY_MISMATCH", 1),
+                 ("type", "ACCOUNT_TYPE_MISMATCH", 1), ("duplicate", "AMBIGUOUS_DISCOVERY_IDENTITIES", 1),
+                 ("inactive", "ACCOUNT_INACTIVE_OR_SUSPENDED", 1), ("suspended", "ACCOUNT_INACTIVE_OR_SUSPENDED", 1),
+                 ("bad-status", "MALFORMED_ACCOUNT_STATUS", 1), ("package", "PACKAGE_IDENTITY_MISMATCH", 2),
+                 ("user-package", "USER_PACKAGE_IDENTITY_MISMATCH", 2))
+        for case, category, calls in cases:
+            _, _, payloads, _ = setup_fixture()
+            row = payloads[0]["result"][0]
+            if case == "account": row["clientId"] = "wrong-synthetic-id"
+            elif case == "owner": row["userId"] = 99
+            elif case == "type": row["type"] = "spot"
+            elif case == "inactive": row["isActive"] = False
+            elif case == "suspended": row["isSuspend"] = True
+            elif case == "bad-status": row["isActive"] = "true"
+            elif case == "duplicate":
+                payloads[0]["result"].append(dict(row))
+                payloads[0]["result_info"].update(count=2, total_count=2)
+            elif case == "package": payloads[1]["result"]["packageDetail"]["id"] = 99
+            else: payloads[1]["result"]["userPackageDetail"]["id"] = 99
+            with self.subTest(case=case):
+                client, transport, _, _ = mock_client(payloads)
+                result = client.fetch(binding, config=config, diagnose_prop=True)
+                self.assertFalse(result.collected)
+                self.assertIsNone(result.bundle)
+                self.assertEqual(result.diagnostic_classification, category)
+                self.assertEqual(result.http_status, 200)
+                self.assertEqual(len(transport.calls), calls)
+                self.assertIs(result.executable_action, Signal.NO_TRADE)
+        client, transport, resolver, _ = mock_client(payloads)
+        self.assert_failed(client.fetch(binding, config=config, diagnose_prop=True, diagnose_scope=True), R.INVALID_CONFIG)
+        self.assertEqual(transport.calls, [])
+        resolver.assert_not_called()
+
 if __name__ == '__main__':
     unittest.main()

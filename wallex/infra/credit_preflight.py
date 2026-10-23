@@ -49,8 +49,11 @@ def _arguments(argv):
     parser = _Arguments(description="Manual Trade Credit GET-only preflight; no trading.")
     parser.add_argument("--connect", action="store_true", required=True,
                         help="Opt in and attest the selected credit account has read access.")
-    parser.add_argument("--diagnose-scope", action="store_true",
-                        help="Read only /sub-accounts and report categorical identity checks.")
+    diagnostic = parser.add_mutually_exclusive_group()
+    diagnostic.add_argument("--diagnose-scope", action="store_true",
+                            help="Read only /sub-accounts and report categorical identity checks.")
+    diagnostic.add_argument("--diagnose-prop", action="store_true",
+                            help="Read discovery and active package only; no balances or account approval.")
     for name in ("sub-account-client-id", "plan-type", "expected-plan-status"):
         parser.add_argument("--" + name, type=_label, required=True)
     for name in ("owner-user-id", "package-id", "user-package-id"):
@@ -112,8 +115,27 @@ def main(argv=None):
             client = CreditReadOnlyClient(transport=UrllibGetTransport(),
                                         resolve_credential=_prompt_credential,
                                         observation_clock=lambda: int(time.time()))
-            result = client.fetch(binding, config=config, diagnose_scope=args.diagnose_scope)
-            if args.diagnose_scope and result.scope_checks is not None:
+            result = client.fetch(binding, config=config, diagnose_scope=args.diagnose_scope,
+                                  diagnose_prop=args.diagnose_prop)
+            if args.diagnose_prop:
+                failures = () if result.reason.value == "PROP_DIAGNOSED" else (result.reason.value,)
+                report = _summary("DIAGNOSTIC_COMPLETE" if not failures else "FAILED", failures)
+                report.update(failed_endpoint=result.failed_endpoint, http_status=result.http_status,
+                              diagnostic_classification=result.diagnostic_classification)
+                report["data_availability"]["balances"] = "NOT_REQUESTED"
+                if result.scope_checks is not None:
+                    report["scope_checks"] = dict(result.scope_checks)
+                    report["data_availability"]["accounts"] = "PRESENT_UNAPPROVED"
+                if not failures:
+                    report["data_availability"]["plan"] = "PRESENT_UNAPPROVED"
+                category = result.diagnostic_classification or ""
+                report["next_step"] = (
+                    "ASK_WALLEX_PROP_ENDPOINT_READ_AUTHORIZATION" if category in
+                    {"PROP_PACKAGE_AUTH_REJECTED", "PROP_PACKAGE_ACCESS_DENIED"} else
+                    "CONFIRM_ACTIVE_PACKAGE_EVIDENCE_WITH_WALLEX" if category == "ACTIVE_PACKAGE_EVIDENCE_ABSENT" else
+                    "CONFIRM_PROP_NOT_FOUND_SEMANTICS_WITH_WALLEX" if category == "PROP_PACKAGE_HTTP_NOT_FOUND" else
+                    "NONE_DIAGNOSTIC_ONLY" if not failures else "VERIFY_IDENTITY_OR_RESPONSE_CONTRACT")
+            elif args.diagnose_scope and result.scope_checks is not None:
                 checks = dict(result.scope_checks)
                 failures = []
                 if (checks["client_id_match"] != "UNIQUE" or checks["user_id_match"] is not True
@@ -126,7 +148,8 @@ def main(argv=None):
                 report.update(scope_checks=checks, http_status=result.http_status)
             elif not result.collected:
                 report = _summary("FAILED", (result.reason.value,))
-                report.update(failed_endpoint=result.failed_endpoint, http_status=result.http_status)
+                report.update(failed_endpoint=result.failed_endpoint, http_status=result.http_status,
+                              diagnostic_classification=result.diagnostic_classification)
             else:
                 failures = _identity_failures(result.bundle, args, int(time.time()))
                 report = _summary("FAILED" if failures else "CONNECTED", failures, matched=not failures)

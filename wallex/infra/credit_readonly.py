@@ -128,6 +128,9 @@ class CreditReadBundle:
 class ReadReason(str, Enum):
     COLLECTED = "COLLECTED"
     SCOPE_DIAGNOSED = "SCOPE_DIAGNOSED"
+    PROP_DIAGNOSED = "PROP_DIAGNOSED"
+    PACKAGE_EVIDENCE_ABSENT = "PACKAGE_EVIDENCE_ABSENT"
+    INACTIVE_OR_SUSPENDED = "INACTIVE_OR_SUSPENDED"
     DISABLED = "DISABLED"
     UNVERIFIED_SCOPE = "UNVERIFIED_SCOPE"
     INVALID_CONFIG = "INVALID_CONFIG"
@@ -157,19 +160,20 @@ class CreditReadResult:
     failed_endpoint: str | None = None
     http_status: int | None = None
     scope_checks: Mapping[str, object] | None = None
+    diagnostic_classification: str | None = None
     credential_scope_verified: bool = field(default=False, init=False)
     executable_ready: bool = field(default=False, init=False)
     executable_action: Signal = field(default=Signal.NO_TRADE, init=False)
 
 
 class _ReadFailure(ValueError):
-    def __init__(self, reason, status=None):
-        self.reason, self.status = reason, status
+    def __init__(self, reason, status=None, classification=None):
+        self.reason, self.status, self.classification = reason, status, classification
 
 
-def _require(ok, reason):
+def _require(ok, reason, classification=None):
     if not ok:
-        raise _ReadFailure(reason)
+        raise _ReadFailure(reason, classification=classification)
 
 
 def _label(value):
@@ -223,13 +227,24 @@ def _sanitize(payload, path, binding, config):
                  and info["count"] == info["total_count"] == len(result), ReadReason.INCOMPLETE_DISCOVERY)
         rows = [_pick(row, ("clientId", "userId", "type", "isActive", "isSuspend")) for row in result]
         ids = [row["clientId"] for row in rows]
-        _require(all(_label(i) for i in ids) and len(set(ids)) == len(ids), ReadReason.AMBIGUOUS_SCOPE)
+        _require(all(_label(i) for i in ids) and len(set(ids)) == len(ids),
+                 ReadReason.AMBIGUOUS_SCOPE, "AMBIGUOUS_DISCOVERY_IDENTITIES")
         matches = [r for r in rows if r["clientId"] == binding.sub_account_client_id]
-        _require(len(matches) == 1 and user_id_matches(matches[0]["userId"], binding.owner_user_id)
-                 and matches[0]["type"] == "prop",
-                 ReadReason.AMBIGUOUS_SCOPE)
+        _require(len(matches) == 1, ReadReason.AMBIGUOUS_SCOPE, "ACCOUNT_IDENTITY_NOT_FOUND")
+        _require(user_id_matches(matches[0]["userId"], binding.owner_user_id),
+                 ReadReason.AMBIGUOUS_SCOPE, "OWNER_IDENTITY_MISMATCH")
+        _require(matches[0]["type"] == "prop", ReadReason.AMBIGUOUS_SCOPE, "ACCOUNT_TYPE_MISMATCH")
+        _require(type(matches[0]["isActive"]) is bool and type(matches[0]["isSuspend"]) is bool,
+                 ReadReason.INVALID_RESPONSE, "MALFORMED_ACCOUNT_STATUS")
+        _require(matches[0]["isActive"] is True and matches[0]["isSuspend"] is False,
+                 ReadReason.INACTIVE_OR_SUSPENDED, "ACCOUNT_INACTIVE_OR_SUSPENDED")
         return {"success": True, "result": rows, "result_info": info}
     if path == GET_PATHS[1]:
+        # Empty evidence is not proof that no active plan exists at the provider.
+        _require(not (result is None or result == {} or (type(result) is dict
+                 and set(result) == {"packageDetail", "userPackageDetail"}
+                 and result["packageDetail"] is None and result["userPackageDetail"] is None)),
+                 ReadReason.PACKAGE_EVIDENCE_ABSENT, "ACTIVE_PACKAGE_EVIDENCE_ABSENT")
         _require(type(result) is dict, ReadReason.INVALID_RESPONSE)
         package = _pick(result.get("packageDetail"), (
             "id", "currency", "destination_currency", "assurance", "loan", "dailyFee",
@@ -237,9 +252,10 @@ def _sanitize(payload, path, binding, config):
         active = _pick(result.get("userPackageDetail"), (
             "id", "type", "status", "createdAt", "expireAt", "finalPayback",
             "finalPayableFeeAmount", "warningLimit", "liquidityLimit"))
-        _require(type(package["id"]) is int and package["id"] == binding.package_id
-                 and type(active["id"]) is int and active["id"] == binding.user_package_id,
-                 ReadReason.AMBIGUOUS_SCOPE)
+        _require(type(package["id"]) is int and package["id"] == binding.package_id,
+                 ReadReason.AMBIGUOUS_SCOPE, "PACKAGE_IDENTITY_MISMATCH")
+        _require(type(active["id"]) is int and active["id"] == binding.user_package_id,
+                 ReadReason.AMBIGUOUS_SCOPE, "USER_PACKAGE_IDENTITY_MISMATCH")
         return {"success": True, "result": {"packageDetail": package, "userPackageDetail": active}}
     _require(type(result) is dict and bool(result), ReadReason.INVALID_RESPONSE)
     return {"success": True, "result": {currency: _pick(row, ("symbol", "total", "freeze", "available"))
@@ -282,17 +298,21 @@ class CreditReadOnlyClient:
         self._clock = observation_clock
 
     def fetch(self, binding: CreditAccountBinding, *, config: ReadOnlyConfig,
-              diagnose_scope: bool = False) -> CreditReadResult:
+              diagnose_scope: bool = False, diagnose_prop: bool = False) -> CreditReadResult:
         """Collect exactly three whitelisted GETs or return no usable bundle.
 
         Only explicit future opt-in and owner-attested matching read scope permit
         resolver/transport use. These declarations never verify actual key scope.
         All failures discard partial evidence; there are no retries or fallbacks.
-        diagnose_scope stops after discovery with checks only, never a bundle.
+        diagnose_scope stops after discovery; diagnose_prop stops after the active
+        package. Both return categorical diagnostics only, never a partial bundle.
         """
         endpoint = None
+        http_status = None
+        checks = None
         try:
-            _require(type(config) is ReadOnlyConfig and type(diagnose_scope) is bool,
+            _require(type(config) is ReadOnlyConfig and type(diagnose_scope) is bool
+                     and type(diagnose_prop) is bool and not (diagnose_scope and diagnose_prop),
                      ReadReason.INVALID_CONFIG)
             _require(config.opt_in is True, ReadReason.DISABLED)
             _require(type(binding) is CreditAccountBinding and binding.kind is AccountKind.TRADE_CREDIT
@@ -313,7 +333,8 @@ class CreditReadOnlyClient:
             _require(_label(secret), ReadReason.CREDENTIAL_UNAVAILABLE)
             reads = []
             previous = None
-            for endpoint in (GET_PATHS[:1] if diagnose_scope else GET_PATHS):
+            for endpoint in (GET_PATHS[:1] if diagnose_scope else GET_PATHS[:2] if diagnose_prop else GET_PATHS):
+                http_status = None
                 request = HttpGet(endpoint, MappingProxyType({
                     "x-api-key": secret, "sub-account-client-id": binding.sub_account_client_id,
                 }), config.timeout_seconds, config.max_response_bytes)
@@ -324,11 +345,16 @@ class CreditReadOnlyClient:
                 except Exception:
                     raise _ReadFailure(ReadReason.TRANSPORT_ERROR) from None
                 _require(type(reply) is HttpReply and type(reply.status) is int, ReadReason.INVALID_RESPONSE)
+                http_status = reply.status
                 if reply.status != 200:
                     reason = {401: ReadReason.AUTHENTICATION_FAILED, 403: ReadReason.FORBIDDEN,
                               404: ReadReason.NOT_FOUND, 429: ReadReason.RATE_LIMITED}.get(reply.status,
                               ReadReason.SERVER_ERROR if 500 <= reply.status <= 599 else ReadReason.HTTP_ERROR)
-                    raise _ReadFailure(reason, reply.status)
+                    classification = None
+                    if endpoint == GET_PATHS[1]:
+                        classification = {401: "PROP_PACKAGE_AUTH_REJECTED", 403: "PROP_PACKAGE_ACCESS_DENIED",
+                                          404: "PROP_PACKAGE_HTTP_NOT_FOUND"}.get(reply.status)
+                    raise _ReadFailure(reason, reply.status, classification)
                 try:
                     observed = self._clock()
                 except Exception:
@@ -341,11 +367,13 @@ class CreditReadOnlyClient:
                 try:
                     payload = json.loads(reply.body.decode("utf-8"), parse_float=Decimal,
                                          parse_constant=_constant, object_pairs_hook=_unique)
-                    if diagnose_scope:
-                        checks = _scope_checks(payload, binding, config)
-                        _require(not _contains(dict(checks), secret), ReadReason.SENSITIVE_RESPONSE)
-                        return CreditReadResult(False, ReadReason.SCOPE_DIAGNOSED,
-                                                http_status=200, scope_checks=checks)
+                    if diagnose_scope or (diagnose_prop and endpoint == GET_PATHS[0]):
+                        candidate_checks = _scope_checks(payload, binding, config)
+                        _require(not _contains(dict(candidate_checks), secret), ReadReason.SENSITIVE_RESPONSE)
+                        checks = candidate_checks
+                        if diagnose_scope:
+                            return CreditReadResult(False, ReadReason.SCOPE_DIAGNOSED,
+                                                    http_status=200, scope_checks=checks)
                     sanitized = _sanitize(payload, endpoint, binding, config)
                     _require(not _contains(sanitized, secret), ReadReason.SENSITIVE_RESPONSE)
                     encoded = json.dumps(sanitized, ensure_ascii=False, allow_nan=False, sort_keys=True)
@@ -354,8 +382,13 @@ class CreditReadOnlyClient:
                 except Exception:
                     raise _ReadFailure(ReadReason.INVALID_RESPONSE) from None
                 reads.append(SanitizedRead(binding.sub_account_client_id, observed, encoded))
+            if diagnose_prop:
+                return CreditReadResult(False, ReadReason.PROP_DIAGNOSED, http_status=200,
+                                        scope_checks=checks, diagnostic_classification="PROP_PACKAGE_READABLE")
             return CreditReadResult(True, ReadReason.COLLECTED, CreditReadBundle(binding, *reads))
         except _ReadFailure as error:
-            return CreditReadResult(False, error.reason, failed_endpoint=endpoint, http_status=error.status)
+            return CreditReadResult(False, error.reason, failed_endpoint=endpoint,
+                                    http_status=error.status if error.status is not None else http_status,
+                                    scope_checks=checks, diagnostic_classification=error.classification or error.reason.value)
         except Exception:
             return CreditReadResult(False, ReadReason.INVALID_CONFIG, failed_endpoint=endpoint)

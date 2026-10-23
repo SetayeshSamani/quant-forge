@@ -95,27 +95,49 @@ Official specification snapshots inspected (public documentation only):
 - [Trade Credit OpenAPI](https://developers.wallex.ir/assets/files/trade-credit-ff5c60b5b97b77a5b2c2e4800f07729c.yaml): SHA-256 `d8141055d11f6fa63867f70d3d0449af2bf7c5d86f67eab7f0d37e73ba3395eb`.
 - [Shared order API Swagger](https://developers.wallex.ir/assets/files/spot-b9d06896d1009adc9ebc69b9a5495e7e.json): SHA-256 `10d8667602b3f82428b7a35688174449843e6ed36c9de816050dccc3e6a69753`.
 
-## Authentication follow-up ? 2026-10-23
+## Prop preflight authentication review ? 2026-10-23
 
-Owner-reported: `GET /sub-accounts` returns 200; `GET
-/v1/prop/user/packages/active` returns 401. No private request was made for this
-review. The public OpenAPI was retrieved again; its SHA-256 matches the snapshot
-above.
+Owner-reported: discovery succeeded and the exact active `prop` identity matched;
+`GET /v1/prop/user/packages/active` returned HTTP 401. No authenticated request
+was made during this review. The public Trade Credit OpenAPI was retrieved again;
+SHA-256 remains `d8141055d11f6fa63867f70d3d0449af2bf7c5d86f67eab7f0d37e73ba3395eb`.
+The generated operation pages were unavailable through the browsing tool;
+requirements below were checked against the downloaded official specification.
 
-- CONFIRMED: both operations declare `security: [{x-api-key: []}]`; the scheme
-  is the `x-api-key` header. [Official OpenAPI](https://developers.wallex.ir/assets/files/trade-credit-ff5c60b5b97b77a5b2c2e4800f07729c.yaml).
-- CONFIRMED: [account discovery](https://developers.wallex.ir/docs/generated/active-sub-accounts-list)
-  declares no endpoint-specific custom header; [active-plan detail](https://developers.wallex.ir/docs/generated/active-user-package-details)
-  documents `sub-account-client-id` (the parameter lacks `required: true`). The
-  current GET-only client already sends both headers with the same supplied key
-  and selected account; no documented extra authentication header was found.
-- UNCLEAR: whether these management operations accept the same Trade Credit key
-  and read permission. [Credit-key guidance](https://developers.wallex.ir/docs/spot-intro)
-  explicitly covers trading, not a management-endpoint access matrix. Discovery
-  success does not establish active-plan authorization; the 401 cause is unverified.
+- **CONFIRMED:** both GET operations declare `security: [{x-api-key: []}]`.
+  Active-package details additionally document `sub-account-client-id` in the
+  header (without `required: true`). The client already sends both headers;
+  no auth-header change or credential substitution is justified.
+  [Official OpenAPI](https://developers.wallex.ir/assets/files/trade-credit-ff5c60b5b97b77a5b2c2e4800f07729c.yaml).
+- **CONFIRMED:** keys are account-specific; key expiry matters and read access is
+  documented as default. Credit trading guidance uses the dedicated credit key
+  plus the sub-account header. These statements do not establish authorization
+  for every management endpoint.
+  [API-key guide](https://developers.wallex.ir/docs/create-api-key),
+  [credit account separation](https://developers.wallex.ir/docs/trade-credit-intro),
+  [credit-key/header guidance](https://developers.wallex.ir/docs/spot-intro).
+- **UNCLEAR:** the management-endpoint ACL/read-permission matrix and the precise
+  cause of this 401. Discovery success proves neither active-plan access nor
+  plan existence. No documented extra header, session token or alternative
+  account principal was found. A permission fix cannot be implemented safely
+  without provider confirmation.
 
-**Blocker:** obtain official Wallex confirmation of API-key account scope,
-read-permission eligibility and required headers for the active-plan operation.
-Credit-plan collection remains unavailable on 401: no partial evidence bundle,
-credential fallback, cookies, session tokens or authentication bypass. No code
-changed; `NO_TRADE` and `executable_ready=False` remain enforced.
+`--diagnose-prop` runs only discovery and active-package GETs. It reports fixed
+categories: 401 `PROP_PACKAGE_AUTH_REJECTED`, 403 `PROP_PACKAGE_ACCESS_DENIED`,
+404 `PROP_PACKAGE_HTTP_NOT_FOUND` (meaning unspecified), absent successful-response
+plan evidence `ACTIVE_PACKAGE_EVIDENCE_ABSENT`, malformed response `INVALID_RESPONSE`,
+and distinct account/owner/type/package mismatch categories. Empty evidence does
+not prove no plan exists; 401/403/404 are never mapped to package absence.
+No balances are requested, no partial bundle is returned and readable evidence
+is explicitly unapproved. Raw bodies, IDs, secrets and headers are never output.
+
+**Exact provider action:** ask Wallex API support to check the dedicated hackathon
+`prop` key's active/expiry status, read-only endpoint ACL and account/package
+association for `GET /v1/prop/user/packages/active` with `x-api-key` and
+`sub-account-client-id`. Request authorization for that GET if supported, or an
+officially documented supported read-only auth contract. Supply only sanitized
+endpoint/status/classification and verified account references through the
+provider's approved private support channel; never share the API key. Do not
+switch to main/margin credentials, browser cookies or session tokens, activate a
+plan, or enable extra trading/withdrawal permissions. Until resolved, credit-plan
+collection remains unavailable; `NO_TRADE` and `executable_ready=False` are permanent.
