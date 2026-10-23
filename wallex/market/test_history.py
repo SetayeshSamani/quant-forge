@@ -15,9 +15,9 @@ from .evaluation import EvidenceKind
 from .normalization import Timeframe
 
 
-def wire(start, end):
-    count = (end - start) // 60
-    return dict(s="ok", t=list(range(start, end, 60)), o=["10"] * count,
+def wire(start, end, step=60):
+    count = (end - start) // step
+    return dict(s="ok", t=list(range(start, end, step)), o=["10"] * count,
                 h=["12"] * count, l=["9"] * count, c=["11"] * count, v=["0.1"] * count)
 
 
@@ -124,6 +124,62 @@ class HistoricalDataTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "RAW_SOURCE_HASH"):
                 h.research_history(config.output)
 
+
+    def test_native_h1_is_exact_closed_and_independent_of_decimal_context(self):
+        start = 1791590400  # 2026-10-10T00:00:00Z; synthetic payload, not QA data.
+        end = start + 264 * 3600
+        data = wire(start, end, step=3600)
+        data["symbol"] = "TESTUSDT"
+        data["completed"] = [True] * 264
+        data["o"][0] = "10.12345678901234567890123456789"
+        data["v"][0] = "0.12345678901234567890123456789"
+        body = encoded(data).replace(b'"0.1"', b'0.1')
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = True
+            candles = h.decode_hours(body, symbol="TESTUSDT", start=start, end=end, as_of=end)
+        self.assertEqual(len(candles), 264)
+        self.assertEqual([c.timestamp for c in candles], list(range(start, end, 3600)))
+        self.assertTrue(all(c.timeframe is Timeframe.H1 and c.completed for c in candles))
+        self.assertEqual((candles[0].open, candles[0].high, candles[0].low, candles[0].close, candles[0].volume),
+                         (Decimal(data["o"][0]), Decimal(12), Decimal(9), Decimal(11), Decimal(data["v"][0])))
+        self.assertEqual(candles[-1].timestamp + 3600, end)
+        self.assertEqual(candles[-1].volume, Decimal("0.1"))  # Native volume is not multiplied by 60.
+        self.assertEqual(candles, h.decode_hours(body, symbol="TESTUSDT", start=start, end=end, as_of=end + 1))
+
+    def test_native_h1_rejects_invalid_coverage_ohlcv_and_cutoffs(self):
+        for case in ("missing", "duplicate", "unordered", "misaligned", "minute-spacing", "boolean-time",
+                     "float-time", "milliseconds", "before-start", "at-end", "truncated-array", "incomplete",
+                     "ohlc", "negative-volume", "nonfinite", "missing-price", "nonpositive", "wrong-symbol", "no-data"):
+            data = wire(3600, 4 * 3600, step=3600)
+            if case == "missing":
+                for key in ("t", "o", "h", "l", "c", "v"): data[key].pop(1)
+            elif case == "duplicate": data["t"][1] = data["t"][0]
+            elif case == "unordered": data["t"] = list(reversed(data["t"]))
+            elif case == "misaligned": data["t"] = [t + 1 for t in data["t"]]
+            elif case == "minute-spacing": data["t"] = [3600, 3660, 3720]
+            elif case == "boolean-time": data["t"][0] = True
+            elif case == "float-time": data["t"][0] = 3600.0
+            elif case == "milliseconds": data["t"] = [t * 1000 for t in data["t"]]
+            elif case == "before-start": data["t"][0] = 0
+            elif case == "at-end": data["t"][-1] = 4 * 3600
+            elif case == "truncated-array": data["v"].pop()
+            elif case == "incomplete": data["completed"] = [True, False, True]
+            elif case == "ohlc": data["l"][0] = "13"
+            elif case == "negative-volume": data["v"][0] = "-1"
+            elif case == "nonfinite": data["v"][0] = "NaN"
+            elif case == "missing-price": data["o"][0] = None
+            elif case == "nonpositive": data["c"][0] = "0"
+            elif case == "wrong-symbol": data["symbol"] = "OTHERUSDT"
+            else: data["s"] = "no_data"
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                h.decode_hours(encoded(data), symbol="TESTUSDT", start=3600, end=4 * 3600, as_of=4 * 3600)
+        body = encoded(wire(0, 7200, step=3600))
+        for start, end, as_of in ((0, 7200, 7199), (1, 7200, 7200), (0, 7199, 7200),
+                                  (0, 0, 7200), (-3600, 7200, 7200), (False, 7200, 7200),
+                                  (0, 7200, None), (0, 7200, 7200.0), (0, 15 * 86400, 15 * 86400)):
+            with self.subTest(range=(start, end, as_of)), self.assertRaises(ValueError):
+                h.decode_hours(body, symbol="TESTUSDT", start=start, end=end, as_of=as_of)
 
 if __name__ == "__main__":
     unittest.main()

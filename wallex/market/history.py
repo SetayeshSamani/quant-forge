@@ -71,6 +71,23 @@ def _reject_constant(value):
 
 
 def decode_minutes(payload, *, symbol, start, end):
+    return _decode_candles(payload, symbol=symbol, start=start, end=end, timeframe=Timeframe.M1)
+
+
+def decode_hours(payload, *, symbol, start, end, as_of):
+    """Validate native H1 opens in [start, end), closed by explicit UTC as_of.
+
+    Actual timestamps, not the requested resolution, establish hourly spacing.
+    No sorting, truncation, gap filling, aggregation or volume conversion occurs.
+    """
+    if (any(type(value) is not int for value in (start, end, as_of))
+            or not 0 <= start < end <= as_of or start % 3600 or end % 3600
+            or end - start > 14 * 86400):
+        raise ValueError("INVALID_NATIVE_H1_RANGE_OR_CUTOFF")
+    return _decode_candles(payload, symbol=symbol, start=start, end=end, timeframe=Timeframe.H1)
+
+
+def _decode_candles(payload, *, symbol, start, end, timeframe):
     if type(payload) is not bytes or len(payload) > MAX_BYTES:
         raise ValueError("INVALID_RESPONSE_SIZE")
     data = json.loads(payload.decode("utf-8"), parse_float=Decimal,
@@ -80,17 +97,17 @@ def decode_minutes(payload, *, symbol, start, end):
     keys = ("t", "o", "h", "l", "c", "v")
     if any(type(data.get(key)) is not list for key in keys):
         raise ValueError("UDF_ARRAYS_REQUIRED")
-    if (any(len(data[key]) != (end - start) // 60 for key in keys)
+    if (any(len(data[key]) != (end - start) // timeframe.value for key in keys)
             or any(type(stamp) is not int for stamp in data["t"])
-            or data["t"] != list(range(start, end, 60))):
-        raise ValueError("M1_COVERAGE_OR_SPACING_INVALID")
+            or data["t"] != list(range(start, end, timeframe.value))):
+        raise ValueError(f"{timeframe.name}_COVERAGE_OR_SPACING_INVALID")
     if "symbol" in data and data["symbol"] != symbol:
         raise ValueError("SYMBOL_MISMATCH")
     if "completed" in data and (type(data["completed"]) is not list
             or len(data["completed"]) != len(data["t"]) or any(value is not True for value in data["completed"])):
         raise ValueError("INCOMPLETE_SOURCE_CANDLE")
     rows = [dict(zip(FIELDS, values + (True,))) for values in zip(*(data[key] for key in keys))]
-    candles = normalize_candles(rows, symbol=symbol, timeframe=Timeframe.M1,
+    candles = normalize_candles(rows, symbol=symbol, timeframe=timeframe,
                                 timestamp_unit=TimestampUnit.SECONDS, as_of=end)
     for candle in candles:
         for field in ("open", "high", "low", "close", "volume"):
