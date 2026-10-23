@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 import json
 import mimetypes
+import os
 from pathlib import Path
 import re
 import signal
@@ -21,6 +22,11 @@ from wallex.market.evaluation import canonical_json
 from .agent_runtime import MODE, PARTITION, BLOCKERS, ObserverConfig, run_observer
 
 MAX_JSON = 1048576
+
+
+def _revision():
+    value = os.environ.get("QF_SOURCE_COMMIT", "")
+    return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
 
 
 def _object(value):
@@ -100,7 +106,7 @@ def snapshot(state_dir, *, now=None):
     """
     now = int(time.time()) if now is None else now
     result = {"mode": MODE, "status": "PERSISTED_STATUS_NOT_LIVENESS_PROOF", "api_schema": 1,
-              "action": "NO_TRADE", "executable_ready": False, "generated_at": now,
+              "action": "NO_TRADE", "executable_ready": False, "generated_at": now, "source_commit": _revision(),
               "data_status": "UNAVAILABLE", "observation_age_seconds": None,
               "last_observation": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
                   "heartbeat_age_seconds": None, "process_liveness": "UNVERIFIED"},
@@ -194,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
             data = snapshot(self.server.state_dir)
             return self._send(200 if data["last_observation"] is not None else 503, canonical_json(data).encode())
         if target.path == "/api/health":
-            return self._send(200, b'{"status":"API_UP","action":"NO_TRADE","executable_ready":false}')
+            return self._send(200, canonical_json({"status":"API_UP","source_commit":_revision(),"action":"NO_TRADE","executable_ready":False}).encode())
         root = self.server.frontend_dir
         path = root / unquote(target.path).lstrip('/') if root else None
         if root and target.path == "/":

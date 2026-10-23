@@ -22,3 +22,5 @@ wallex/**/*.json
 wallex/**/*.csv
 wallex/**/*.zip
 wallex/**/observations/**
+!wallex/backtest/fixtures/synthetic_m15.jsonl
+!wallex/backtest/fixtures/synthetic_h1.jsonl
