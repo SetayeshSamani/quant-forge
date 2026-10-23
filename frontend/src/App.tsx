@@ -10,6 +10,8 @@ import { Overview } from "./pages/Overview";
 import { DecisionCenter } from "./pages/DecisionCenter";
 import { CreditRisk } from "./pages/CreditRisk";
 import { Operations } from "./pages/Operations";
+import { BackendStatus, BackendView } from "./pages/BackendView";
+import { useObserver } from "./data/useObserver";
 import type { EvidenceState, ImportedEvidence } from "./data/runtimeEvidence";
 
 const pageFromHash = (): PageId => {
@@ -17,6 +19,8 @@ const pageFromHash = (): PageId => {
   return Object.hasOwn(PAGE_TITLES, hash) ? hash as PageId : "overview";
 };
 export function App() {
+  const demoView = new URLSearchParams(window.location.search).get("view") === "demo";
+  const observer = useObserver(!demoView);
   const [page, setPage] = useState<PageId>(pageFromHash);
   const [evidence, setEvidence] = useState<EvidenceState>({ public: null, account: null });
   const importEvidence = (value: ImportedEvidence) => setEvidence(current => ({ ...current, [value.kind]: value }));
@@ -26,9 +30,9 @@ export function App() {
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
   useEffect(() => {
-    const demo = page === "overview" || page === "credit-risk" || page === "decision-center";
+    const demo = demoView && (page === "overview" || page === "credit-risk" || page === "decision-center");
     document.title = `${PAGE_TITLES[page]} | QuantForge ${demo ? "DEMO" : "READ ONLY"}`;
-  }, [page]);
+  }, [page, demoView]);
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.dataset.theme === "light" ? "light" : "dark",
   );
@@ -71,13 +75,19 @@ export function App() {
     <>
       <AppShell
         page={page}
+        demoView={demoView}
         theme={theme}
         setTheme={setTheme}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
         onNotifications={() => showNotice("notifications")}
       >
-        {page === "credit-risk" ? (
+        {demoView && <a className="subtle-button" href="/#overview">بازگشت به داشبورد متصل به API</a>}
+        {!demoView && <BackendStatus connection={observer} />}
+        {!demoView ? (
+          page === "overview" || page === "credit-risk" || page === "decision-center" ? <BackendView page={page} connection={observer}/> :
+          <Operations page={page} evidence={{public:observer.market,account:null}} remote={observer} onImport={()=>{}} onClear={()=>{}}/>
+        ) : page === "credit-risk" ? (
           <CreditRisk />
         ) : page === "decision-center" ? (
           <DecisionCenter />
