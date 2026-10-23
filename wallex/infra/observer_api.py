@@ -98,6 +98,38 @@ def _observation(raw, symbol):
             "readiness_blockers": list(dict.fromkeys([*BLOCKERS, *_codes(raw.get("readiness_blockers"))]))}
 
 
+def _ai_projection(raw, symbol, now):
+    """Allowlist public technical metadata only; never prose/provider bodies."""
+    if (type(raw) is not dict or raw.get("symbol") != symbol or raw.get("action") != "NO_TRADE"
+            or raw.get("executable_ready") is not False or type(raw.get("records")) is not list
+            or len(raw["records"]) > 5):
+        return None
+    records = []
+    for row in raw["records"]:
+        if type(row) is not dict or row.get("action") != "NO_TRADE" or row.get("executable_ready") is not False:
+            continue
+        stamps = [row.get(k) for k in ("as_of", "requested_at", "completed_at")]
+        if (any(_stamp(v) is None for v in stamps) or not stamps[0] <= stamps[1] <= stamps[2] <= now
+                or row.get("inference_source") not in ("BOXAPI_HTTPS", "SYNTHETIC_TEST_TRANSPORT")
+                or row.get("evidence_kind") not in ("historical_data", "synthetic_fixture")
+                or re.fullmatch(r"[0-9a-f]{64}", str(row.get("evidence_hash"))) is None
+                or re.fullmatch(r"[0-9a-f]{40}", str(row.get("source_commit"))) is None
+                or row.get("advisory_decision") not in ("REVIEW", "NO_TRADE")):
+            continue
+        models = {k: row.get(k) if type(row.get(k)) is str and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,95}", row[k]) else None
+                  for k in ("requested_model", "response_model")}
+        allowed = {"OK", "TIMEOUT", "AUTHENTICATION_FAILED", "FORBIDDEN", "RATE_LIMITED", "HTTP_ERROR",
+                   "REQUEST_LIMIT_REACHED", "INVALID_RESPONSE", "TRANSPORT_ERROR", "INVALID_CONTEXT"}
+        status = row.get("status") if row.get("status") in allowed else "INVALID_RESPONSE"
+        from wallex.ai_provider.models import REASONS
+        allowed_codes = set().union(*REASONS.values(), allowed)
+        records.append({**models, "status": status, "reason_codes": [v for v in _codes(row.get("reason_codes")) if v in allowed_codes],
+            **{k: row[k] for k in ("as_of", "requested_at", "completed_at", "evidence_hash", "source_commit", "inference_source", "evidence_kind")},
+            "advisory_decision": row["advisory_decision"], "action": "NO_TRADE", "executable_ready": False})
+    return {"records": records, "action": "NO_TRADE", "executable_ready": False,
+            "decision_cutoff": _stamp(raw.get("decision_cutoff")), "status": "RECORDED_RESEARCH_ONLY" if records else "UNAVAILABLE"}
+
+
 def snapshot(state_dir, *, now=None):
     """Read selected public-partition events, never initialize/mutate Ledger.
 
@@ -108,7 +140,7 @@ def snapshot(state_dir, *, now=None):
     result = {"mode": MODE, "status": "PERSISTED_STATUS_NOT_LIVENESS_PROOF", "api_schema": 1,
               "action": "NO_TRADE", "executable_ready": False, "generated_at": now, "source_commit": _revision(),
               "data_status": "UNAVAILABLE", "observation_age_seconds": None,
-              "last_observation": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
+              "last_observation": None, "ai_review": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
                   "heartbeat_age_seconds": None, "process_liveness": "UNVERIFIED"},
               "blockers": list(BLOCKERS), "private_account_api": "NOT_EXPOSED_REQUIRES_AUTHENTICATED_BACKEND"}
     try:
@@ -136,9 +168,12 @@ def snapshot(state_dir, *, now=None):
                 if len(row[0]) > MAX_JSON:
                     raise ValueError("OBSERVER_RECORD_TOO_LARGE")
                 return _decode(row[0]), int(datetime.fromisoformat(row[1]).timestamp()), row[2]
+            ai = latest(("public_tp1_ai_review",))
             observation = latest(("observer_cycle_completed",))
             heartbeat = latest(("observer_heartbeat",))
             lifecycle = latest(("observer_started", "observer_stopped", "observer_failed"))
+        if ai:
+            result["ai_review"] = _ai_projection(ai[0], config.symbol, now)
         if observation:
             result["last_observation"] = _observation(observation[0], config.symbol)
             observed = result["last_observation"]["observed_at"]

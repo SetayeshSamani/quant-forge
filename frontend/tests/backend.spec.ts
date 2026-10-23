@@ -2,6 +2,7 @@ import { expect,test } from "@playwright/test";
 
 function fixture(status="RECENT_CAPTURED") {
   return {mode:"PUBLIC_OBSERVATION_ONLY",status:"PERSISTED_STATUS_NOT_LIVENESS_PROOF",api_schema:1,action:"NO_TRADE",executable_ready:false,
+    ai_review:{records:[{status:"OK",advisory_decision:"REVIEW",requested_model:"gpt-5.4-mini",response_model:"gpt-5.4-mini-synthetic",evidence_hash:"a".repeat(64),source_commit:"b".repeat(40),as_of:1792762200,completed_at:1792763000,inference_source:"SYNTHETIC_TEST_TRANSPORT",evidence_kind:"synthetic_fixture",reason_codes:["REVIEW_REQUIRED"],action:"NO_TRADE",executable_ready:false}]},
     generated_at:1792763000,data_status:status,observation_age_seconds:status==="STALE" ? 1800 : 20,
     runtime:{state:"RUNNING",heartbeat_age_seconds:20,process_liveness:"UNVERIFIED"},blockers:["PE_UNAVAILABLE","CREDIT_PLAN_UNVERIFIED"],
     last_observation:{mode:"PUBLIC_OBSERVATION_ONLY",action:"NO_TRADE",executable_ready:false,symbol:"BTCTMN",observed_at:1792762980,decision_cutoff:1792762200,health:"RUNNING",
@@ -25,6 +26,12 @@ test("default nine-route backend view uses public evidence without demo financia
     await expect(page.locator(".workspace")).not.toContainText("12,067.20");
     await expect(page.locator(".workspace")).toContainText("NO_TRADE");
     if(hash==="decision-center") await expect(page.getByRole("region",{name:"ژورنال واقعیِ ارزیابی‌های فنی"})).toContainText("PREVIOUS_CLOSE_ABOVE_EMA20");
+    if(hash==="decision-center") {
+      const ai=page.getByRole("region",{name:"AI · شواهد پژوهشی ثبت‌شده"});
+      await expect(ai).toContainText("SYNTHETIC_TEST_TRANSPORT");
+      await expect(ai).toContainText("REVIEW_REQUIRED");
+      await expect(ai).toContainText("gpt-5.4-mini-synthetic");
+    }
     if(hash==="credit-risk") await expect(page.locator(".workspace")).toContainText("UNAVAILABLE");
   }
   await expect(page.locator('input[type="file"]')).toHaveCount(0);

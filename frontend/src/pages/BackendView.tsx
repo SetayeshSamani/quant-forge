@@ -23,6 +23,9 @@ export function BackendView({ page,connection:c }: {page:PageId;connection:Obser
       <Panel title="اطلاعات مالی حساب" icon="wallet"><Fields rows={[["موجودی / ارزش حساب","UNAVAILABLE"],["بدهی / وثیقه","UNAVAILABLE"],["سود و زیان","UNAVAILABLE"]]}/><p>هیچ موجودی یا سود نمایشی با دادهٔ واقعی بازار ترکیب نمی‌شود. API خصوصی احرازهویت‌شده متصل نیست.</p></Panel>
     </>}
     {page==="decision-center" && <>
+      <Panel title="AI · شواهد پژوهشی ثبت‌شده" icon="nodes">{c.aiReviews.length ? c.aiReviews.map(row=><div key={row.evidenceHash}>
+        <Fields rows={[["وضعیت inference",row.status],["منبع / نوع داده",`${row.source} · ${row.evidenceKind}`],["تصمیم مشورتی",row.decision],["مدل درخواست / پاسخ",`${row.requestedModel ?? "UNAVAILABLE"} / ${row.responseModel ?? "UNAVAILABLE"}`],["cutoff UTC",utc(row.asOf)],["زمان ثبت UTC",utc(row.completedAt)],["Evidence SHA-256",row.evidenceHash],["Source commit",row.sourceCommit]]}/><Reasons values={row.reasons}/>
+      </div>) : <p>UNAVAILABLE — شواهد inference واقعی ثبت نشده است.</p>}<p>REVIEW فقط حفظ کاندیدای پژوهشی است؛ NO_TRADE وتوی مشورتی است. هیچ‌کدام تأیید Risk، حساب یا اجرای سفارش نیست. این رکورد تاریخی است و ممکن است با آخرین cutoff بازار متفاوت باشد.</p></Panel>
       <Panel title="مرکز تصمیم · ارزیابی واقعی TP-1" icon="nodes"><Fields rows={[["نماد",m?.symbol],["cutoff UTC",m ? utc(m.cutoff) : null],["واجد شرایط فنی",m?.eligible],["تصمیم اجرایی","NO_TRADE"],["مجوز اجرا","false"]]}/><p>Market → Strategy → Risk → Credit → Audit → Execution: دادهٔ عمومی و ارزیابی فنی قابل مشاهده‌اند؛ تأیید Risk/Credit/Execution وجود ندارد.</p><Reasons values={m?.technicalReasons ?? []}/></Panel>
       <Panel title="ژورنال واقعیِ ارزیابی‌های فنی" icon="list">{c.steps.length ? c.steps.map((step,i)=><div key={i}><h3>{utc(step.cutoff)} · {step.eligible ? "کاندیدای فنی، بدون تأیید اجرا" : "شرایط فنی برقرار نیست"}</h3><Reasons values={step.reasons}/></div>) : <p>گام ارزیابی‌شده‌ای از API در دسترس نیست.</p>}</Panel>
     </>}

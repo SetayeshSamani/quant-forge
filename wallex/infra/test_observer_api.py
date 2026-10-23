@@ -118,3 +118,29 @@ class ObserverApiTests(unittest.TestCase):
         with patch.object(api,'Server',return_value=server),patch.object(api.signal,'signal',side_effect=lambda key,handler:handlers.update({key:handler})):
             self.assertEqual(api.main(['--state-dir','synthetic-unused-state']),0)
         server.server_close.assert_called_once()
+
+    def test_ai_public_projection_excludes_private_prose_and_invalid_provenance(self):
+        from wallex.ai_provider.client import BoxAPIClient
+        from wallex.ai_provider.test_client import KEY, reply
+        from wallex.ai_provider.tp1_review import CandidateAdviser
+        from wallex.market.evaluation import EvidenceKind
+        from wallex.strategy.test_frame_adapter import frame_fixture
+        from wallex.shadow.tp1 import tp1_decision
+        with source() as (cfg,_):
+            transport=Mock();transport.post.return_value=reply()
+            adviser=CandidateAdviser(BoxAPIClient(api_key=KEY,transport=transport), source_commit='a'*40,
+                source_hashes={'m1':'b'*64,'h1':'c'*64},evidence_kind=EvidenceKind.SYNTHETIC_FIXTURE,clock=lambda:AS_OF+1)
+            tp1_decision(frame_fixture(as_of=AS_OF),adviser=adviser)
+            row=dict(adviser.records[0]);row.update(explanation='PRIVATE_BODY',headers={'key':KEY},account_id='PRIVATE_ID')
+            report={'symbol':cfg.symbol,'action':'NO_TRADE','executable_ready':False,'decision_cutoff':AS_OF,'records':[row]}
+            Ledger(cfg.state_dir/'audit.sqlite').record_event('public_tp1_ai_review',account_id=PARTITION,run_id='test',trace_id='test',
+                at=datetime.fromtimestamp(AS_OF+1,timezone.utc),payload=report)
+            projected=api.snapshot(cfg.state_dir,now=AS_OF+1)['ai_review']
+            self.assertEqual(projected['records'][0]['status'],'OK')
+            self.assertEqual(projected['records'][0]['inference_source'],'SYNTHETIC_TEST_TRANSPORT')
+            self.assertFalse(projected['executable_ready'])
+            for secret in ('PRIVATE_BODY','PRIVATE_ID',KEY):self.assertNotIn(secret,json.dumps(projected))
+            for field,bad in (('evidence_hash','bad'),('source_commit','bad'),('completed_at',AS_OF+2),('executable_ready',True)):
+                with self.subTest(field=field):
+                    invalid=dict(row);invalid[field]=bad
+                    self.assertEqual(api._ai_projection(report|{'records':[invalid]},cfg.symbol,AS_OF+1)['records'],[])
