@@ -7,7 +7,23 @@ trading agent. It reuses history/depth transports, gap-aware offline TP-1/Shadow
 Risk/Credit diagnostics, Runtime states and the existing durable Audit Ledger.
 It makes no private request during observation, never creates an ExecutionRequest
 or intent, and never calls submit/cancel. All results remain NO_TRADE and
-executable_ready=false. Optional UI work was deferred to keep P0 focused.
+executable_ready=false. The UI can import sanitized captured reports, without
+a live management API or browser credentials.
+
+Owner-run independent account preflight on **2026-10-23** returned HTTP 200 for
+`/sub-accounts`, `/v1/account/balances-detail` and `/v1/account/openOrders`.
+The selected active, unsuspended prop identity matched; balances validated and
+quote availability was positive. Zero open orders were observed, but complete
+coverage was not established. The initial collector incorrectly required credit-
+style pagination fields from Spot `result_info`; that assumption is removed.
+The owner reran the revised collector successfully: authenticated_reads_succeeded
+was true and all three scoped GETs returned 200. Spot metadata contained integer
+page/count/per_page fields but no total_count, confirming the original mismatch.
+Order coverage remains UNVERIFIED_PROVIDER_PAGINATION; zero observed orders is
+not an atomic flat-account assertion. This is owner-supplied redacted evidence,
+not an independently repeated private request by Codex.
+No private request or key was handled by Codex. These reads establish neither
+trading permission nor risk authorization; the original package 401 is separate.
 
 Live admission cannot safely be implemented by wiring an HTTP order endpoint:
 - `wallex/risk/pipeline.py`: permanently diagnostic; no approved risk/admission token.
@@ -24,43 +40,69 @@ Live admission cannot safely be implemented by wiring an HTTP order endpoint:
 No execution guard, TP-1 rule, risk calculation, replay system or MarketFrame
 contract was changed. No nonfunctional write-adapter skeleton was added.
 
-## Account preflight (OWNER runs interactively)
+## Independent scoped account READ preflight (OWNER runs interactively)
 
-Run from the repository root with Python 3.11+ (validated runtime: 3.14.7).
-Supply your already verified identifiers locally; placeholders below are NOT IDs.
-Never send the key in chat or pass it as an argument/environment/frontend variable.
+From the repository root, Python 3.11+ (validated runtime: 3.14.7):
 
 ```powershell
-$state = "$env:LOCALAPPDATA\QuantForge\agent-observer"
-python -B -m wallex.infra.agent_runtime preflight --state-dir "$state" --symbol BTCTMN --base BTC --quote TMN -- --connect --sub-account-client-id YOUR_CLIENT_ID --owner-user-id YOUR_USER_ID --package-id YOUR_PACKAGE_ID --user-package-id YOUR_USER_PACKAGE_ID --currency TMN --plan-type YOUR_PLAN_TYPE --expected-plan-status YOUR_STATUS
+python -B -m wallex.infra.spot_preflight --connect --symbol BTCTMN --base BTC --quote TMN
 ```
 
-The existing hidden getpass prompt and strict account/owner/package checks are
-reused. Only the existing three GET endpoints can run. Failure, including prop
-401, is preserved; partial checks never become approval. Add `--diagnose-prop` at
-the end to request discovery + active plan only. No secret, account identifier or
-raw account response is written to the observer journal. Currency must match the
-observer's quote. A process already holding this state directory's observer lock
-must be stopped before preflight.
+Enter the dedicated Hackathon/prop account key ONLY at the hidden getpass prompt.
+The CLI discovers identities using GET `/sub-accounts`, displays active,
+unsuspended prop choices with masked client IDs, and requires `HACKATHON N` to
+confirm the intended account and its dedicated key. Cancel if the masked choice
+cannot be identified. No manually entered user ID or package ID is needed.
+Discovery is refreshed after confirmation; duplicate, changed, incomplete,
+unknown-type or inactive identities fail closed. There is no main-account fallback.
 
-A successful read does not establish Hackathon mode or trade permission. The owner
-must verify key issuance while the intended Hackathon/prop account was selected,
-expiry and read/trade permissions in Wallex; withdrawal must remain disabled.
-Official account separation requires the dedicated credit key AND sub-account
-header: https://developers.wallex.ir/docs/spot-intro . The order `client_id` is not
-that sub-account ID. Key permissions: https://developers.wallex.ir/docs/create-api-key .
+The first discovery GET sends only `x-api-key`. Once explicitly selected, both
+`x-api-key` and `sub-account-client-id` are required for refreshed discovery and
+GET `/v1/account/balances-detail`, GET `/v1/account/openOrders`. Orders are bounded
+to three pages / 300 records. Official Spot `result_info` is untyped: no
+`page/count/total_count` shape is assumed. Its fixed-field type diagnostics are
+redacted; empty or differently shaped metadata is not an authentication failure.
+A validated read stays distinct from coverage, which remains UNVERIFIED even
+with zero observed orders. Empty pages stop collection without proving flatness. The public market GET is `/hector/web/v1/markets`.
+The endpoint-specific active-package 401 is not used by this independent path.
+The existing credit-plan preflight remains available and strict, separately;
+missing plan evidence still blocks credit-risk approval.
 
-The prop 401 is endpoint-specific, not proof that spot trading is impossible.
-Ask Wallex to confirm that key's active-package read ACL and account/package
-association. Never substitute main/margin credentials or use cookies/session tokens.
-Until the complete account/fee/market/exposure/recovery contracts are verified and
-live integration separately reviewed and approved, real-money mode is unavailable.
+Stdout is sanitized JSON: endpoint status codes, identity/status checks, positive
+quote-capital/exposure flags, observed order count/coverage, market precision and
+explicit blockers. No IDs, exact amounts, order IDs, headers, keys or raw account
+responses are returned or saved. Exit 0 means authenticated read collection
+succeeded, **not** execution readiness. The key remains ephemeral; no retry,
+redirect, proxy, authenticated write or speculative order is performed.
+
+Official scope: https://developers.wallex.ir/docs/spot-intro requires a dedicated
+credit key AND the sub-account header. Discovery reference:
+https://developers.wallex.ir/docs/trade-credit-active-sub-account-list .
+Public official spot specification:
+https://developers.wallex.ir/assets/files/spot-b9d06896d1009adc9ebc69b9a5495e7e.json .
+Owner/user identity is a discovered consistency check, not an order parameter.
+Order `client_id` identifies an ORDER, not the selected account.
+
+Read success cannot prove trade permission, Hackathon mode, independently echoed
+response scope, fee funding, complete instrument/credit eligibility or atomic
+reconciliation. Verify key issuance in the intended account, expiry, read/trade
+permissions and disabled withdrawal with Wallex. If a scoped read returns 401/403,
+ask Wallex to verify that key's ACL for the exact failed route and account binding;
+never substitute a main/margin key or session token. Retain the exact redacted
+failure; no authentication workaround is implemented.
+
+A real-order adapter is **not enabled or implemented** in this change: protected
+risk, durable intent and exit/recovery contracts listed above cannot issue valid
+live authorization. No synthetic replay decision or wallet balance is promoted
+into approval. Local activation and these missing prerequisites remain explicit
+blockers irrespective of the old package endpoint's outcome.
 
 ## Run once, continuously, inspect and stop
 
 ```powershell
 # Public-only; NO credentials. The base-volume flag is an explicit UNVERIFIED
 # caller assumption for existing price diagnostics, not independent unit verification.
+$state = "$env:LOCALAPPDATA\QuantForge\agent-observer"
 python -B -m wallex.infra.agent_runtime observe --fetch-public --once --state-dir "$state" --symbol BTCTMN --base BTC --quote TMN --volume-unit base
 # Continuous: remove --once. Optional --max-cycles N bounds scheduled iterations.
 python -B -m wallex.infra.agent_runtime observe --fetch-public --state-dir "$state" --symbol BTCTMN --base BTC --quote TMN --volume-unit base
@@ -120,3 +162,23 @@ Vercel serves only frontend/dist; it cannot run this durable Python worker.
 Private preflight is manual, interactive and separate. A public observer restart
 requires no credential; this deployment does not provide autonomous account/order
 management. Do not deploy real-money execution until all blockers above are resolved.
+
+## Frontend evidence and release
+
+All nine sidebar routes render. Overview, Decision Center and Credit & Risk keep
+labelled DEMO scenarios; the separate historical summary remains OFFLINE.
+Strategy & Market, Positions & Orders, Backtest & Analytics, Robot Control,
+Alerts & Events, and Connections & Settings display captured report evidence or
+explicit unavailable reasons, never fabricated balances, fills or P&L.
+
+In Connections & Settings choose the worker's `observations/.../report.json`, a
+sanitized `status` JSON, or the spot CLI's sanitized JSON. Only allowlisted fields
+are projected in memory; nothing is uploaded or persisted in browser storage.
+Reload clears evidence. Files with secret/header fields are rejected. Imported
+files are unverified snapshots, never live freshness or account authorization.
+Start/Stop/live Refresh remain disabled with their actual missing backend reason.
+
+Static deployment remains root `frontend`, Node 22.12+, install `npm ci`, build
+`npm run build`, output `dist`, no environment variables or API proxy. A trusted
+persistent Python worker is separate; browser-hosted authenticated actions and
+real-money execution are unavailable. Public worker operations require no key.

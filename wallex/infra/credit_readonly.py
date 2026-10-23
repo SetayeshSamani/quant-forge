@@ -76,11 +76,17 @@ class UrllibGetTransport:
     No ambient proxy, redirect, retry, write method or reusable request history.
     Construction/import performs no HTTP. Tests must inject a mock transport.
     """
+    def _allowed_path(self, path):
+        return path in GET_PATHS
+
+    def _allowed_headers(self, request):
+        return set(request.headers) == {"x-api-key", "sub-account-client-id"}
+
     def get(self, request: HttpGet) -> HttpReply:
-        if (type(request) is not HttpGet or request.path not in GET_PATHS
+        if (type(request) is not HttpGet or not self._allowed_path(request.path)
                 or type(request.timeout_seconds) is not int or not 1 <= request.timeout_seconds <= 60
                 or type(request.max_response_bytes) is not int or not 1 <= request.max_response_bytes <= 1048576
-                or set(request.headers) != {"x-api-key", "sub-account-client-id"}
+                or not self._allowed_headers(request)
                 or not all(_label(v) for v in request.headers.values())):
             raise ValueError("Invalid read-only request")
         opener = build_opener(ProxyHandler({}), _NoRedirect(),

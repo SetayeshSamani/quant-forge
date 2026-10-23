@@ -9,22 +9,25 @@ import { Icon } from "./components/Icon";
 import { Overview } from "./pages/Overview";
 import { DecisionCenter } from "./pages/DecisionCenter";
 import { CreditRisk } from "./pages/CreditRisk";
+import { Operations } from "./pages/Operations";
+import type { EvidenceState, ImportedEvidence } from "./data/runtimeEvidence";
 
 const pageFromHash = (): PageId => {
   const hash = window.location.hash.slice(1);
-  return hash === "credit-risk" || hash === "decision-center"
-    ? hash
-    : "overview";
+  return Object.hasOwn(PAGE_TITLES, hash) ? hash as PageId : "overview";
 };
 export function App() {
   const [page, setPage] = useState<PageId>(pageFromHash);
+  const [evidence, setEvidence] = useState<EvidenceState>({ public: null, account: null });
+  const importEvidence = (value: ImportedEvidence) => setEvidence(current => ({ ...current, [value.kind]: value }));
   useEffect(() => {
     const navigate = () => setPage(pageFromHash());
     window.addEventListener("hashchange", navigate);
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
   useEffect(() => {
-    document.title = `${PAGE_TITLES[page]} | QuantForge DEMO`;
+    const demo = page === "overview" || page === "credit-risk" || page === "decision-center";
+    document.title = `${PAGE_TITLES[page]} | QuantForge ${demo ? "DEMO" : "READ ONLY"}`;
   }, [page]);
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.dataset.theme === "light" ? "light" : "dark",
@@ -78,8 +81,10 @@ export function App() {
           <CreditRisk />
         ) : page === "decision-center" ? (
           <DecisionCenter />
-        ) : (
+        ) : page === "overview" ? (
           <Overview onReviewRisk={() => showNotice("risk")} />
+        ) : (
+          <Operations page={page} evidence={evidence} onImport={importEvidence} onClear={() => setEvidence({ public: null, account: null })} />
         )}
       </AppShell>
       <dialog

@@ -7,19 +7,25 @@ export const PAGE_TITLES = {
   overview: "نمای کلی",
   "credit-risk": "اعتبار و ریسک",
   "decision-center": "مرکز تصمیم",
+  "strategy-market": "استراتژی و بازار",
+  "positions-orders": "موقعیت‌ها و سفارش‌ها",
+  "backtest-analytics": "بک‌تست و تحلیل",
+  "robot-control": "کنترل ربات",
+  "alerts-events": "هشدارها و رویدادها",
+  connections: "اتصال و تنظیمات",
 } as const;
 export type PageId = keyof typeof PAGE_TITLES;
 const navigation: readonly { label: string; icon: IconName; page?: PageId }[] =
   [
     { label: "نمای کلی", icon: "home", page: "overview" },
     { label: "اعتبار و ریسک", icon: "shield", page: "credit-risk" },
-    { label: "استراتژی و بازار", icon: "chart" },
+    { label: "استراتژی و بازار", icon: "chart", page: "strategy-market" },
     { label: "مرکز تصمیم", icon: "nodes", page: "decision-center" },
-    { label: "موقعیت‌ها و سفارش‌ها", icon: "orders" },
-    { label: "بک‌تست و تحلیل", icon: "pie" },
-    { label: "کنترل ربات", icon: "bot" },
-    { label: "هشدارها و رویدادها", icon: "bell" },
-    { label: "اتصال و تنظیمات", icon: "settings" },
+    { label: "موقعیت‌ها و سفارش‌ها", icon: "orders", page: "positions-orders" },
+    { label: "بک‌تست و تحلیل", icon: "pie", page: "backtest-analytics" },
+    { label: "کنترل ربات", icon: "bot", page: "robot-control" },
+    { label: "هشدارها و رویدادها", icon: "bell", page: "alerts-events" },
+    { label: "اتصال و تنظیمات", icon: "settings", page: "connections" },
   ];
 export function AppShell({
   children,
@@ -38,6 +44,7 @@ export function AppShell({
   setSidebarOpen: (open: boolean) => void;
   onNotifications: () => void;
 }) {
+  const demoPage = page === "overview" || page === "credit-risk" || page === "decision-center";
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -96,8 +103,8 @@ export function AppShell({
           <div className="demo-account">
             <Icon name="user" size={30} />
             <div>
-              <span>حساب نمایشی</span>
-              <b dir="ltr">{DEMO.account}</b>
+              <span>{demoPage ? "حساب نمایشی" : "اتصال حساب به UI"}</span>
+              <b dir="ltr">{demoPage ? DEMO.account : "UNVERIFIED"}</b>
             </div>
           </div>
           <button className="trade-disabled" disabled>
@@ -121,7 +128,7 @@ export function AppShell({
             </button>
             <div>
               <h1>{PAGE_TITLES[page]}</h1>
-              <p>حساب اعتباری والکس · سناریوی نمایشی</p>
+              <p>{demoPage ? "حساب اعتباری والکس · سناریوی نمایشی" : "گزارش محلی فقط‌خواندنی · بدون اتصال زنده"}</p>
             </div>
           </div>
           <div className="header-controls">
@@ -131,9 +138,9 @@ export function AppShell({
             </span>
             <Badge tone="danger">
               <Icon name="pause" size={17} />
-              متوقف
+              {demoPage ? "متوقف" : "اجرای معامله غیرفعال"}
             </Badge>
-            <Badge tone="info">DEMO</Badge>
+            <Badge tone="info">{demoPage ? "DEMO" : "READ ONLY"}</Badge>
             <div
               className="theme-switch"
               role="group"
