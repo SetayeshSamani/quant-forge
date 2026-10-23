@@ -46,6 +46,28 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn(KEY, repr(result))
         self.assertNotIn(KEY, json.dumps(asdict(result)))
 
+    def test_boxapi_routed_metadata_preserves_strict_structured_decision(self):
+        value=envelope(provider="OpenAI", routing_metadata={"synthetic":True})
+        value["choices"][0]["native_finish_reason"]="completed"
+        value["choices"][0]["routing_metadata"]={"synthetic":True}
+        value["choices"][0]["message"]["annotations"]=[]
+        value["usage"]={"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"cost":0.01}
+        self.transport.post.return_value=reply(value)
+        result=self.client.advise(self.context)
+        self.assertEqual(result.status,"OK")
+        self.assertEqual(result.http_status,200)
+        self.assertEqual(len(result.response_sha256),64)
+        self.assertFalse(result.executable)
+        for case in ("tool_call","annotations","truncated"):
+            from copy import deepcopy
+            invalid=deepcopy(value)
+            if case=="tool_call":invalid["choices"][0]["message"]["tool_calls"]=[{}]
+            elif case=="annotations":invalid["choices"][0]["message"]["annotations"]=[{"type":"external"}]
+            else:invalid["choices"][0]["finish_reason"]="length"
+            with self.subTest(case=case):
+                self.transport.post.return_value=reply(invalid)
+                self.assert_closed(self.client.advise(self.context),"INVALID_RESPONSE")
+
     def test_successful_advice_and_bounded_wire_contract(self):
         self.transport.post.assert_not_called()
         result = self.client.advise(self.context)
@@ -62,7 +84,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer " + KEY)
         payload = json.loads(request.body)
         self.assertEqual(json.loads(payload["messages"][1]["content"]), asdict(self.context))
-        self.assertEqual(payload["max_tokens"], 512)
+        self.assertEqual(set(payload), {"model", "messages"})
+        self.assertEqual(payload["model"], DEFAULT_MODEL)
         self.assertNotIn(KEY, request.body.decode())
         self.assertNotIn(KEY, repr(request))
         self.assertNotIn(KEY, repr(self.client))

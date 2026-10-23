@@ -102,7 +102,7 @@ class CandidateAdviser:
         record = {"status": result.status, "advisory_decision": result.decision,
             "retained_for_research": assessment.technical_eligible and result.status == "OK" and result.decision == "REVIEW",
             "assessment_mode": context["mode"], "technical_eligible": assessment.technical_eligible,
-            "provider": result.provider, "endpoint": "https://ai.boxapi.ir/api/v1/chat/completions",
+            "provider": result.provider, "endpoint": self.client.endpoint,
             "http_status": result.http_status, "response_sha256": result.response_sha256,
             "explanation": result.explanation,
             "reason_codes": list(result.reason_codes), "requested_model": result.requested_model,

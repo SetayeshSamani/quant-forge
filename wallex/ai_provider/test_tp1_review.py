@@ -87,6 +87,7 @@ class TP1ReviewTests(unittest.TestCase):
                 row=json.loads(result.diagnostics_json)['ai']
                 self.assertEqual(transport.post.call_count,1)
                 self.assertEqual(row['http_status'],200)
+                self.assertEqual(row['endpoint'],'https://ai.boxapi.ir/ai/v1/chat/completions')
                 self.assertEqual(len(row['response_sha256']),64)
                 self.assertFalse(row['retained_for_research'])
                 self.assertEqual(row['advisory_decision'],decision)
