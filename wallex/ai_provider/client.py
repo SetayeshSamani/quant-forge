@@ -150,6 +150,10 @@ class BoxAPIClient:
         self._model = model
         self._timeout = timeout_seconds
 
+    @property
+    def uses_https_transport(self):
+        return type(self._transport) is UrllibTransport
+
     def _closed(self, status):
         return AdvisoryResult("NO_TRADE", (status,), "Advisory unavailable; no trading authorization.",
                               status, self._model)
@@ -165,6 +169,20 @@ class BoxAPIClient:
             return self._closed("INVALID_CONTEXT")
         if any(s != "VERIFIED" for s in (context.data_quality, context.risk, context.credit)):
             return self._closed("DETERMINISTIC_GATE_CLOSED")
+        return self._complete(snapshot)
+
+    def review_technical(self, context: dict) -> AdvisoryResult:
+        """Research-only veto of validated TP-1 evidence, never account approval.
+
+        This separate mode does not change advise()'s existing risk/credit gate.
+        The integrated caller derives values from actual Strategy assessments.
+        """
+        from .tp1_review import valid_context
+        if not valid_context(context) or not self._clean(context):
+            return self._closed("INVALID_CONTEXT")
+        return self._complete(context)
+
+    def _complete(self, snapshot):
         instructions = (
             "Return ONLY a JSON object with exactly version, decision, reason_codes, explanation. "
             f"version must be {VERSION!r}. decision is NO_TRADE or REVIEW. "

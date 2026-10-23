@@ -57,12 +57,13 @@ def _decision(record):
     return {"technical_eligible": technical["technical_eligible"],
             "technical_reasons": technical["reasons"],
             "technical_evidence": detail["technical_evidence"],
-            **reasons, "blockers": sorted(set(blockers))}
+            **reasons, "blockers": sorted(set(blockers)),
+            **({"ai": detail["ai"]} if "ai" in detail else {})}
 
 
 def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
                 m1_start, m1_end, h1_start, h1_end, as_of,
-                evidence_kind, volume_unit=None):
+                evidence_kind, volume_unit=None, adviser=None):
     """Read two raw public UDF responses; never fetch, infer Pe or supply accounts.
 
     Ranges are explicit UTC OPEN seconds, end exclusive; as_of closes both files.
@@ -131,7 +132,7 @@ def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
                     local_blockers[f"frame:{error.code.value}:{error.dataset}"] += 1
                     continue
                 shadow = run_tp1_shadow(plan, strategy_version="tp1-offline-integration-v1",
-                                        evidence_kind=evidence_kind)
+                                        evidence_kind=evidence_kind, adviser=adviser)
                 record = shadow.evaluations[0]
                 result = _decision(record)
                 counts["replay_errors"] += int(record.error_code is not None)

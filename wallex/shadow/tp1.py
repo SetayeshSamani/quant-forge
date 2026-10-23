@@ -52,6 +52,7 @@ def _step_context(frame, pe, risk, credit):
 def tp1_decision(frame, *, pe: Decimal | None = None,
                  risk_inputs_for_step: Callable[[object], PipelineInputs | None] | None = None,
                  credit_inputs_for_step: Callable[[object], CreditEvidenceInputs | None] | None = None,
+                 adviser=None,
                  ) -> ReplayDecision:
     """Journal actual technical reasons; Pe stays explicit and provisional.
 
@@ -86,6 +87,12 @@ def tp1_decision(frame, *, pe: Decimal | None = None,
     for name in ("loss", "portfolio", "sizing"):
         component = getattr(assessed_risk, name)
         risk_details[name + "_reasons"] = None if component is None else component.reasons
+    if adviser is not None:
+        try:
+            risk_details["ai"] = adviser(frame, assessment)
+        except Exception:
+            risk_details["ai"] = {"status": "ADVISER_FAILED", "action": "NO_TRADE",
+                                  "executable_ready": False}
     reasons = {"frame": assessment.reasons}
     for name in ("trend", "pullback", "stop"):
         component = getattr(assessment, name)
@@ -103,6 +110,7 @@ def run_tp1_shadow(plan: ReplayPlan, *, strategy_version: str,
                    evidence_kind: EvidenceKind, pe: Decimal | None = None,
                    risk_inputs_for_step: Callable[[object], PipelineInputs | None] | None = None,
                    credit_inputs_for_step: Callable[[object], CreditEvidenceInputs | None] | None = None,
+                   adviser=None,
                    ) -> ShadowResult:
     """Reuse run_shadow; caller callbacks must be pure and use the exact step frame.
 
@@ -112,5 +120,5 @@ def run_tp1_shadow(plan: ReplayPlan, *, strategy_version: str,
     """
     return run_shadow(plan, partial(tp1_decision, pe=pe,
                                    risk_inputs_for_step=risk_inputs_for_step,
-                                   credit_inputs_for_step=credit_inputs_for_step),
+                                   credit_inputs_for_step=credit_inputs_for_step, adviser=adviser),
                       strategy_version=strategy_version, evidence_kind=evidence_kind)
