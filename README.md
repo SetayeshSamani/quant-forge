@@ -1,187 +1,240 @@
-## Local persistent-credential demo
+<div align="center">
+  <img src="frontend/public/brand.svg" width="76" alt="QuantForge logo" />
+  <h1>QuantForge</h1>
+  <p><strong>Every decision explained. Every order gated.</strong></p>
+  <p>An explainable AI-assisted algorithmic trading platform for the Wallex Agentic AI Hackathon.</p>
+  <p>پلتفرم تحلیل و تصمیم‌گیری شفاف، با داشبورد فارسی و کنترل‌های مستقل ریسک</p>
 
-Python 3.11+, Node.js 22.12+ and Windows PowerShell are required. Keep the owner's
-root `.env` local; use `.env.example` only when creating a new configuration.
-Process environment overrides `.env`, which overrides defaults. Keys are loaded
-in backend memory on every restart, never exported to npm or the browser.
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![SQLite](https://img.shields.io/badge/Audit-SQLite-003B57?logo=sqlite&logoColor=white)
+![Mode](https://img.shields.io/badge/Execution-NO__TRADE-important)
 
-```powershell
-./start-demo.ps1           # Public observer + read-only account check + one real AI assessment
-./stop-demo.ps1            # Cooperative shutdown; all evidence and audit data retained
-```
+[Product tour](#product-tour) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evidence & safety](#evidence--safety)
+</div>
 
-Open `http://127.0.0.1:8080` (or configured `BACKEND_PORT`). `DATA_DIR` persists
-observations/audit across launches. Initial account/AI checks run once per launch;
-API refresh does not repeat paid inference. Private amounts/IDs remain server-side.
-`TRADING_MODE` labels configuration only: this demo always remains **NO_TRADE**,
-including when LIVE flags are configured. HTTPS BUY/SELL, recovery and fee-aware
-settlement are implemented and mock-tested, but actual submission remains blocked
-by missing reviewed permission, credit/fee policies, maximum venue limits,
-source-event quote freshness and verified equity/loss history. Explicit execution
-admission reuses the unchanged diagnostic Risk checks; it does not manufacture evidence. A limit-based protective exit cannot guarantee a fill.
+![Connected QuantForge Overview: genuine Wallex observations, recorded AI assessment and blocked live execution](docs/screenshots/overview-desktop.png)
 
-# QuantForge — Wallex Agentic AI Hackathon
+**Working public-market observation. Real BoxAPI inference. No claimed live fills or returns.**
+QuantForge combines validated Wallex candles and order-book observations with deterministic TP-1 diagnostics,
+a structured AI review, independent risk controls and an auditable execution foundation.
+The connected dashboard reports evidence and missing prerequisites; it never turns partial checks into trading approval.
 
-QuantForge demonstrates a cost-aware TP-1 Trend Pullback workflow with explicit
-market-data uncertainty and fail-closed risk/credit diagnostics. This submission
-includes **offline research, a real-public-market observer and read-only UI**,
-with real execution disabled.
-Every executable action remains **NO_TRADE**, `executable_ready=false`.
+## Product tour
 
-## Architecture and features
+![QuantForge connected product walkthrough](docs/media/quantforge-demo.gif)
 
-- `frontend/`: React + TypeScript + Vite, Persian RTL, reusable components,
-  bundled Vazirmatn, persistent dark/light themes and responsive navigation.
-  Nine routes: Overview, Decision Center, Credit & Risk, Strategy & Market,
-  Positions & Orders, Backtest & Analytics, Robot Control, Alerts & Events, Settings.
-- `wallex/market/`: strict OHLCV validation, native H1 ingestion, gap-aware M15
-  segmentation and research-only public order-book/spread diagnostics.
-- `wallex/strategy/`: deterministic Decimal EMA/ATR, H1 trend, M15 pullback,
-  initial stops and provisional frame diagnostics.
-- `wallex/risk/` and `wallex/infra/`: diagnostic sizing/loss/portfolio checks
-  and read-only credit-evidence foundations; missing evidence blocks entry.
-- `wallex/shadow/`, `wallex/backtest/`, `wallex/audit/`, `wallex/execution/`:
-  offline replay, journals and execution foundations. No live path is enabled.
+*12-second tour: Overview → Strategy → Decision Center → Credit & Risk → Orders.
+Captured from the actual connected localhost application, in Persian RTL dark mode.
+These are timestamped captures, not a live data feed. The Orders lifecycle is explicitly SIMULATION / HTTP_MOCK.*
 
-Saved public data → validation/independent consecutive segments → TP-1 technical
-assessment → risk/credit diagnostics → Shadow journal → **NO_TRADE**.
-The default frontend polls the real read-only Python observer API every 15
-seconds. It displays actual public-market/TP-1 reports, health and blockers.
-Optional owner-run AI review evaluates actual TP-1 candidates as research-only
-REVIEW/veto, with model/hash/timestamp evidence in Decision Center. Missing real
-provider evidence is UNAVAILABLE; mock results are labelled synthetic. Checked
-replay admission reuses risk controls; stop monitoring never submits exits.
-Private balances, credit, orders and profit stay unavailable. The legacy synthetic
-presentation/manual importer exists only at the explicit `?view=demo` URL.
-No credentials or private Wallex requests run in the browser. See the
-[connected local/API/Liara runbook](docs/OBSERVER_DASHBOARD.md).
-
-## Run the UI
-
-Prerequisite: Node.js >=22.12 (validated with Node 24.21.0).
-
-```powershell
-cd frontend
-npm ci
-npm run dev
-# Production build and local production preview:
-npm run build
-npm run preview
-```
-
-Open the printed local URL. Start the public Python API as described in the
-runbook for real data; without it the connected view shows an error, not DEMO.
-No API key or frontend environment file is needed. Build runs strict TypeScript checking. Optional existing browser smoke
-checks: `npm test` with Playwright Chromium installed, or set
-`$env:PW_BROWSER_CHANNEL = "msedge"` to use installed Edge.
-
-## Supervised public-market worker
-
-A real-public-market worker now reuses the existing TP-1/Shadow diagnostics with
-persistent Audit events, run-once/continuous modes and controlled shutdown.
-It remains NO_TRADE; independent authenticated account READ preflight is a
-separate `.env`-configured check, without package/user IDs or the active-plan route:
-
-```powershell
-python -B -m wallex.infra.spot_preflight --connect --symbol BTCTMN --base BTC --quote TMN
-```
-
-Configure the explicitly verified prop account in `WALLEX_SUBACCOUNT_ID`. When empty,
-`--discover-account` accepts only one active, unsuspended prop account and fills only
-that empty field; ambiguous identities fail closed. Both key and account header are used for scoped
-balance/order reads. No main-account fallback, write operation or order test exists.
-Read success never grants trade permission or risk approval.
-See [startup, preflight, status and durable-worker requirements](docs/AGENT_RUNTIME.md).
-Live trading remains blocked by unapproved risk/admission, unverified complete fill/
-account coverage, fees/market rules and an inactive owner-approved exit/recovery policy.
-
-## Offline Python evidence
-
-Use Python 3.11+ and the standard library, from the repository root:
-
-```powershell
-# Clearly synthetic, deterministic walkthrough; no network/account calls:
-python -B -m wallex.shadow.tp1_demo
-# Existing real-data workflow and all required local-file/cutoff arguments:
-python -B -m wallex.shadow.offline_tp1 --help
-```
-
-See [the offline integration command](docs/OFFLINE_TP1.md) for saved raw M1/native
-H1 files. Never join M15 segments across gaps: each decision needs at least
-21 consecutive M15 and 250 completed consecutive H1 candles.
-
-The owner-confirmed **BTCTMN HISTORICAL / OFFLINE** result is 264 H1, 24 M15,
-4 evaluated steps, 0 eligible steps, 0 errors, **NO_TRADE**. Decision Center shows
-only this supplied summary. Original response files, hashes, UTC range/cutoff and
-per-step rejection reasons are not bundled; no independent rerun is claimed here.
-The original three screens retain **DEMO** fixtures. The six operational pages
-use explicitly selected captured reports or unavailable states, separately from DEMO.
-
-## Deployment modes
-
-For the functional connected dashboard, use the root Dockerfile and the
-[Python API/persistent-volume runbook](docs/OBSERVER_DASHBOARD.md); Liara preparation
-is included, deployment has not been performed. The static-only option below
-cannot run the observer/API and needs a separate same-origin reverse proxy.
-
-### Static-only presentation
-
-Use any static Vite-compatible host and select the reviewed release commit/branch:
-
-| Setting | Value |
+| Strategy & Market | AI Decision Center |
 | --- | --- |
-| Repository | `SetayeshSamani/quant-forge` |
-| Root / working directory | `frontend` |
-| Node | 22.12+ (24 supported) |
-| Install | `npm ci` |
-| Build | `npm run build` |
-| Publish / output directory | `dist` relative to `frontend` |
-| Environment variables | None |
+| ![TP-1 multi-timeframe analysis](docs/screenshots/strategy-market-desktop.png) | ![Recorded real BoxAPI advisory assessment](docs/screenshots/decision-center-desktop.png) |
+| Closed H1/M15 candle requirements, trend, pullback and public bid/ask evidence. | Provider/model evidence, advisory reasons and the technical evaluation journal. |
 
-Serve at the host's site root over HTTPS. Navigation uses URL hashes, so no API
-proxy or server-side route rewrites are needed. Do not deploy the Python tree as
-a server and never put credentials in frontend variables. Hosting/project setup,
-public URL and upload/submission are manual release steps; no deployment is
-performed by this repository change.
+| Credit & Risk | Positions & Orders |
+| --- | --- |
+| ![Credit and risk evidence boundaries](docs/screenshots/credit-risk-desktop.png) | ![Read-only account status and explicitly simulated lifecycle](docs/screenshots/positions-orders-desktop.png) |
+| Verified read status is separated from unavailable credit and risk-equity evidence. | Actual read-only status and a separately labelled synthetic HTTP lifecycle. |
 
-## Video walkthrough (about 3 minutes)
+<details>
+<summary><strong>Analytics, operations and settings — all nine routes</strong></summary>
 
-1. **Overview:** identify the DEMO banner and disabled trading; show Persian RTL,
-   navigation and dark/light mode.
-2. **Decision Center:** show the separate HISTORICAL / OFFLINE BTCTMN panel and
-   its 264 / 24 / 4 / 0 / 0 summary. Explain that no eligible entry is a valid
-   outcome, not a profit claim. Expand the read-only summary.
-3. **Decision flow:** explicitly switch attention to the synthetic DEMO scenario;
-   inspect Market → Strategy → Risk → Credit → Audit → Execution and its blockers.
-4. **Credit & Risk:** distinguish sample values from unverified account evidence;
-   explain that wallet balance is not inferred risk equity.
-5. In **Connections & Settings**, load the public worker's saved `report.json`.
-   Show its actual technical reasons/counts in Strategy & Market and Analytics;
-   explain captured timestamps, missing account inputs and disabled host controls.
-6. Optionally load sanitized owner-run spot preflight JSON. Positions & Orders
-   shows only redacted evidence flags/counts; zero observed orders is not atomic
-   flatness or admission. End with NO_TRADE and the deployment URL.
+| Backtest & Analytics | Robot Control |
+| --- | --- |
+| ![Historical technical assessment](docs/screenshots/backtest-analytics-desktop.png) | ![Worker state and safe host controls](docs/screenshots/robot-control-desktop.png) |
 
-## Limitations
+| Alerts & Events | Connections & Settings |
+| --- | --- |
+| ![Timestamped observations and readiness blockers](docs/screenshots/alerts-events-desktop.png) | ![Connected backend settings and expandable diagnostics](docs/screenshots/connections-desktop.png) |
 
-No live orders, account writes or automatic execution. The UI/public worker uses
-no credentials; a separate explicit interactive GET-only preflight is available.
-Credit-plan authentication (prop HTTP 401) remains unresolved, separately from
-the independent scoped read preflight. Its actual result is owner-run; missing
-credit evidence, fees, quote freshness and execution permissions remain unverified.
-Public depth receipt time is not provider event time or verified freshness.
-MarketFrame schemas remain provisional; technical eligibility never authorizes
-trading. No backtested profitability, completed trades or verified capacity is
-claimed. The demo is ready for presentation, not production trading.
+</details>
 
-## Final hackathon release evidence
+### Persian RTL, on mobile too
 
-See [competition submission, evidence matrix and five-minute outline](docs/HACKATHON_SUBMISSION.md)
-and [exact reproduction/source/Docker commands](docs/RELEASE_REPRODUCIBILITY.md).
-The existing fee-aware engine and TP-1 Shadow are composed by
-`python -B -m wallex.shadow.release_evidence --help`; real market files stay
-outside Git and retain hashes/cutoffs. Simulation costs/capital are explicit
-assumptions. TP-1 remains NO_TRADE; no live performance or actual AI contribution
-is claimed. Docker build, public collection, API/UI refresh and persistent stop/restart are
-verified locally;
-native port8080 UI/API/collection and controlled stop/persistence were checked.
+<p align="center">
+  <img src="docs/screenshots/overview-mobile.png" width="30%" alt="Overview at 390 by 844" />
+  <img src="docs/screenshots/strategy-market-mobile.png" width="30%" alt="Strategy at 390 by 844" />
+  <img src="docs/screenshots/decision-center-mobile.png" width="30%" alt="Decision Center at 390 by 844" />
+</p>
+
+The same application supports persistent dark/light themes, bundled Vazirmatn typography,
+responsive navigation and read-only refresh. The separate `?view=demo` presentation uses
+explicitly labelled synthetic fixtures; **none of the captures above use that mode**.
+
+## What is implemented
+
+| Capability | What the code actually does |
+| --- | --- |
+| **Wallex market evidence** | Public OHLCV collection, native H1 ingestion, strict validation, gap-aware M15 segmentation, public depth/spread diagnostics and source hashes. |
+| **TP-1 technical assessment** | Decimal SMA-seeded EMA, Wilder ATR14, H1 trend, M15 pullback and proposed initial stops, with causal closed-candle cutoffs. |
+| **Real AI integration** | BoxAPI `gpt-5.4-mini` structured observation review and candidate retain/veto support; provider/model, evidence hashes and timestamps are audited. AI is advisory. |
+| **Risk & credit** | Explicit Pe, cost-aware sizing, daily-loss/drawdown and portfolio checks, offline credit evidence; missing or stale evidence fails closed. No equity inferred from balances. |
+| **Execution foundation** | Scoped HTTPS BUY/SELL operations, durable client IDs, partial fills, timeout/restart recovery, protective-exit and fee-aware settlement mechanisms. Development verification uses injected HTTP. |
+| **Replay & Shadow** | Existing replay/backtest infrastructure and actual TP-1 technical journals; gaps are never joined to manufacture history. |
+| **Audit & dashboard** | Persistent SQLite evidence, timestamps and rejection reasons, a read-only Python HTTP API and nine React routes polling every 15 seconds. |
+
+### The actual TP-1 rules
+
+- **H1 trend:** `EMA20[h] > EMA50[h]` and `EMA20[h] > EMA20[h−3]`, after at least **250 consecutive completed H1 candles**.
+- **M15 pullback:** previous close at/below EMA20, current close above EMA20, and `0 < close − EMA20 ≤ ATR14`; at least **21 consecutive completed M15 candles**.
+- **Proposed long stop:** `min(lowest_low_last3 − 0.1 × ATR14, Pe − 1.5 × ATR14)`. **Pe is explicitly supplied**, never silently inferred from a candle close or ask.
+- A technical candidate is research evidence, **not** an executable order. Risk, account, market, exit and owner-authorization gates remain independent.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  W[Wallex public candles and depth] --> M[Market collector and validation]
+  M --> T[TP-1 closed-candle diagnostics]
+  T --> A[BoxAPI structured advisory review]
+  T --> R[Risk and credit diagnostics]
+  A -. advisory retain or veto .-> R
+  R -. separate verified admission required .-> E[Execution gateway - LIVE locked]
+  M --> L[SQLite audit and persisted reports]
+  T --> L
+  A --> L
+  R --> L
+  E --> L
+  L --> P[Read-only Python HTTP API]
+  P --> U[React dashboard - Persian RTL]
+  S[Injected HTTP simulation] --> E
+```
+
+The API uses Python's standard-library HTTP server, **not FastAPI**. Private credentials and
+raw account evidence stay in the backend; the public projection exposes sanitized status categories.
+AI approval cannot bypass deterministic risk or authorize an exchange write.
+
+## Quick start
+
+**Requirements:** Windows PowerShell, Python **3.11+**, Node.js **22.12+**, npm.
+
+```powershell
+git clone https://github.com/SetayeshSamani/quant-forge.git
+cd quant-forge
+# First setup only; NEVER overwrite an existing private .env.
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# Edit .env locally with your private keys and verified sub-account identity.
+# Keep TRADING_MODE=SHADOW and LIVE_TRADING_ENABLED=false.
+.\start-demo.ps1
+```
+
+Open **http://127.0.0.1:8080**. The script installs frontend dependencies if needed,
+builds the UI and launches the managed backend. Public observations are collected;
+configured account checks are GET-only. When configured, one real AI observation assessment
+runs per launch; UI refresh does not repeat paid inference.
+
+```powershell
+.\stop-demo.ps1   # Cooperative shutdown; evidence and audit data are preserved.
+.\start-demo.ps1  # Restart reuses local configuration and persistent DATA_DIR.
+```
+
+**Configuration precedence:** process environment → root `.env` → safe defaults.
+Keys are loaded in backend memory, never passed to npm or the browser. Missing credentials
+or evidence produces explicit unavailable/blocked states. Even LIVE-labelled configuration
+does **not** enable real orders through the demo supervisor.
+
+### Offline and execution demonstrations
+
+```powershell
+# Synthetic fixture walkthrough: no API requests, credentials or real trades.
+python -B -m wallex.shadow.tp1_demo
+# Injected HTTP lifecycle: BUY → partial fill → recovery → SELL → settlement.
+python -B -m wallex.execution.simulation --simulate
+# Saved genuine public data: explicit files, symbol, UTC cutoff and provenance.
+python -B -m wallex.shadow.offline_tp1 --help
+# Fee-aware research composition; assumptions must be explicit.
+python -B -m wallex.shadow.release_evidence --help
+```
+
+See [offline TP-1 inputs](docs/OFFLINE_TP1.md), [observer/API setup](docs/OBSERVER_DASHBOARD.md)
+and [worker/preflight details](docs/AGENT_RUNTIME.md). Downloaded market data is not committed.
+
+## Evidence & safety
+
+| Evidence | Verified result and boundary |
+| --- | --- |
+| **Genuine Wallex technical replay** | Captured BTCTMN assessment: **264 H1 / 24 M15**, **4 evaluated / 0 eligible / 0 errors**. This is historical technical assessment, not a trade-performance backtest. |
+| **Real model inference** | BoxAPI HTTPS **200**, `gpt-5.4-mini`, parsed response, genuine observation hashes and verified audit readback were observed before this showcase at source `d384adb`. Correct endpoint: `/ai/v1/chat/completions`. |
+| **Execution lifecycle** | BUY/FILL/SELL/reconciliation and recovery exercised with **HTTP_MOCK**. These are not real exchange fills or realized returns. |
+| **Regression history** | Before this documentation/media task: **620 Python tests** and **11 browser tests** passed on the pre-showcase release; 22 focused execution/risk tests also ran on Python 3.11. |
+| **This change** | Documentation and actual browser captures only. **No test suite or build was run for this showcase.** |
+
+All executable dashboard actions remain **NO_TRADE**, `executable_ready=false`.
+LIVE is **NO-GO** until account trade permissions, credit obligations, fee-debit policy,
+complete market limits, verified executable quote freshness, independent risk equity/loss
+history, reconciliation and a specific owner-approved order are established.
+A limit-based protective exit cannot guarantee a fill.
+
+The unresolved prop active-package HTTP 401 is separate from successful scoped Spot GETs;
+a successful authenticated read never proves trade permission. Provider receipt time is
+not a provider market-event timestamp. No profits, balances, trade counts or investment
+returns are fabricated.
+
+### Reproduce checks when reviewing code
+
+```powershell
+# Canonical wallex.* module suite, including nested modules:
+$modules = @(rg --files wallex -g 'test_*.py' | Sort-Object | ForEach-Object {
+    ($_ -replace '[\\/]', '.') -replace '\.py$', ''
+})
+python -B -m unittest $modules -q
+$env:PW_BROWSER_CHANNEL = 'msedge'  # Installed Edge, or use Playwright Chromium.
+npm --prefix frontend test
+npm --prefix frontend run check
+npm --prefix frontend run build
+```
+
+These commands are provided for reproduction, not claimed as a fresh showcase test run.
+
+## Deployment
+
+**Connected release:** use the root Dockerfile, a single worker, port **8080**, persistent
+**`/data`**, and a pinned source SHA. Explicit `--fetch-public` opts into public collection.
+Local Docker startup/health, public observer collection, stop/restart and persistence were
+previously verified; **Liara deployment itself is not claimed**.
+Follow [exact source/Docker commands](docs/RELEASE_REPRODUCIBILITY.md).
+
+**Static UI only:** root `frontend`, install `npm ci`, build `npm run build`, output `dist`.
+It needs a separate same-origin Python API/proxy for real observations; static hosting
+alone cannot run the collector. Hash navigation requires no SPA route rewrite.
+Never put secrets in `VITE_*`, frontend configuration or public deployment artifacts.
+
+## Project structure
+
+```text
+frontend/             React, TypeScript, Vite, RTL UI and browser checks
+wallex/market/        Public data collection, validation, provenance and replay
+wallex/strategy/      TP-1 EMA/ATR, trend, pullback, stops and frame diagnostics
+wallex/ai_provider/   BoxAPI client and auditable structured advisory review
+wallex/risk/          Sizing, loss, portfolio, credit and admission checks
+wallex/execution/     Scoped transport, durable lifecycle and HTTP simulation
+wallex/audit/         SQLite ledger and evidence persistence
+wallex/shadow/        Replay journals and offline integration workflows
+wallex/backtest/      Existing fee-aware research engine
+wallex/infra/         Configuration, read-only preflight, worker and HTTP API
+docs/                 Evidence, runbooks, screenshots and product preview
+```
+
+## Security
+
+- `.env`, credential backups and sensitive runtime files are excluded from Git. Never share or commit keys.
+- Explicit sub-account scope; no automatic fallback to a main Spot account or Margin credentials.
+- Backend-only private data; sanitized public API, no raw account responses or account identifiers in the UI.
+- No withdrawals, plan activation, speculative test orders or implicit LIVE activation.
+- Unknown outcomes and incomplete evidence block admission. AI failures do not create approval.
+
+## Five-minute hackathon demo
+
+1. **0:00–0:45 — Overview:** show actual public observations, captured timestamps and permanent LIVE BLOCKED status.
+2. **0:45–1:40 — Strategy:** explain H1 trend, M15 pullback, gap rejection and the legitimate zero-candidate result.
+3. **1:40–2:30 — Decision Center:** show the actual BoxAPI model/advisory result and technical journal; distinguish inference from order authorization.
+4. **2:30–3:30 — Risk & Orders:** separate scoped reads from unavailable credit/risk evidence; show the explicitly labelled HTTP_MOCK lifecycle.
+5. **3:30–4:20 — Analytics & Audit:** distinguish technical replay from profitability, then expand Connections for evidence hashes and source identity.
+6. **4:20–5:00 — Reproducibility:** show startup, safe shutdown, persistent audit and exact live blockers. Do not reveal `.env`, private responses or credentials.
+
+[Competition submission & evidence matrix](docs/HACKATHON_SUBMISSION.md) ·
+[Reproducibility runbook](docs/RELEASE_REPRODUCIBILITY.md) ·
+[Frontend documentation](frontend/README.md)
