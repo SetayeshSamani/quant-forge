@@ -76,3 +76,51 @@ after restart and finds the original order using the same client ID. The output
 keeps unknown quantities null, reservations held and sellable balance unknown.
 The temporary database is removed when the example finishes. The example never
 opens an existing account database or contacts an exchange.
+
+## Scoped HTTPS gateway (disabled by default)
+
+`WallexExchange` in `wallex_http.py` supplies real fixed-origin HTTPS operations:
+POST orders (LIMIT BUY/SELL), GET order by persisted client ID, DELETE orders
+with `clientOrderId` query, and GET openOrders/trades/balances-detail. No redirects,
+ambient proxies, retry, credential files, main-account fallback or automatic calls.
+Official contracts: https://api-docs.wallex.ir/ and
+https://developers.wallex.ir/docs/spot-intro . The newer cancellation documentation
+also offers a path variant; this adapter uses the query variant above, without fallback.
+
+`WallexGateway` reuses ReplayGateway's durable state machine. Construct a separate
+`Ledger(path, mode=Mode.LIVE)`; existing replay databases are refused, never migrated.
+Default ReplayGateway still rejects LIVE. Before a new write, authorization must
+bind the exact request, current strict Risk pipeline result, approved stop/cost
+policy, explicit fee currency, instrument limits, fresh balances/quote and reviewed
+prerequisite evidence hashes. An account-bound explicit local owner confirmation
+is mandatory. There is no --live flag, environment activation or background trader.
+The proof hashes are trusted-backend evidence references, not self-verifying claims;
+the existing read-only preflight cannot manufacture missing permission/fee/coverage
+or risk authorization. No production evidence producer for those missing facts is
+claimed. Fresh authenticated sub-account scope and balance reads are rechecked.
+Actual HTTPS POST/DELETE also require a short-lived account/client-bound permit.
+
+`authorize_entry -> submit -> reconcile/recover_account -> cancel (if partial) ->
+authorize_exit -> submit -> reconcile -> settle` uses the same SQLite intent/fill
+tables. Local fill IDs hash each per-order economic row plus identical-row occurrence;
+they are NOT venue fill IDs. Full snapshot quantity must match executedQty. Unassigned
+account trades never supply guessed fills. Rejection, malformed/missing fills, fees,
+404, timeout or conflicting observations fail closed; uncertain POST is never retried.
+Protective SELL is bound to confirmed acquired base (minus fees), persisted stop,
+explicit price floor and current exposure. Exact terminal base/quote balance deltas
+including fees are required before releasing reservations. TMN is not converted to IRR;
+any dust, external movement or frozen funds blocks settlement. Mock status is MOCK_SETTLED.
+
+Focused network-mock verification:
+`python -B -m unittest wallex.execution.test_wallex_live -q`.
+No real order has been sent. Actual HTTPS admission also requires executable Risk authority; the existing
+diagnostic pipeline explicitly returns executable_ready=False, so manually
+supplied proof hashes and owner confirmation cannot promote it to LIVE. The mock
+lifecycle is labelled HTTP_MOCK and does not establish real risk authorization.
+FIRST LIVE entry remains NO-GO pending reviewed executable Risk authority, verified trade
+ACL, actual fees and credit market/size rules, complete account/exposure coverage,
+current approved Risk/Pe and exit/recovery/settlement evidence, plus separate owner
+activation. A LIMIT protective exit can remain unfilled during a gap; automatic
+monitoring/repricing and a reviewed fail-safe operator policy are not claimed.
+Read-only owner verification reuses `python -B -m wallex.infra.spot_preflight --connect
+--symbol BTCTMN --base BTC --quote TMN`, with the existing key in hidden prompt only.

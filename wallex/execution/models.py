@@ -197,10 +197,12 @@ class ExecutionRequest:
                 or not isinstance(self.risk_decision.reason, RiskReason)
                 or self.schema_version != SCHEMA_VERSION):
             raise ContractError("Typed provisional request components and supported version are required.")
-        if self.evidence_kind not in ("synthetic_fixture", "shadow_decision"):
+        if self.evidence_kind not in ("synthetic_fixture", "shadow_decision", "live_verified"):
             raise ContractError("Only explicit offline evidence is supported.")
         if self.intent.mode == Mode.REPLAY and self.evidence_kind != "synthetic_fixture":
             raise ContractError("Replay requires explicitly synthetic evidence.")
+        if self.evidence_kind == "live_verified" and self.intent.mode != Mode.LIVE:
+            raise ContractError("Live evidence requires explicit live mode.")
         expected = self.intent.quote_asset if self.intent.side == Side.BUY else self.intent.base_asset
         minimum = (exact_product(self.intent.quantity_base, self.intent.price_quote_per_base)
                    if self.intent.side == Side.BUY else self.intent.quantity_base)

@@ -1,1 +1,1 @@
-"""Offline execution consumers; no exchange client or live order tools."""
+"""Durable replay and explicitly authorized Wallex HTTPS execution consumers."""
