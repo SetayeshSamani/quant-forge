@@ -1,6 +1,7 @@
 """Explicit single-call BoxAPI advisory client, with no ambient credentials."""
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from hashlib import sha256
 import json
 import math
 import re
@@ -213,11 +214,12 @@ class BoxAPIClient:
             reason = {401: "AUTHENTICATION_FAILED", 403: "FORBIDDEN", 429: "RATE_LIMITED"}.get(status, "HTTP_ERROR")
             if status == 403 and self._request_limit(response.body):
                 reason = "REQUEST_LIMIT_REACHED"
-            return self._closed(reason)
+            return replace(self._closed(reason), http_status=status)
         try:
-            return self._parse(response.body)
+            return replace(self._parse(response.body), http_status=status,
+                           response_sha256=sha256(response.body).hexdigest())
         except Exception:
-            return self._closed("INVALID_RESPONSE")
+            return replace(self._closed("INVALID_RESPONSE"), http_status=status)
 
     @staticmethod
     def _request_limit(body):

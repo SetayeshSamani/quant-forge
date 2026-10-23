@@ -71,3 +71,52 @@ class TP1ReviewTests(unittest.TestCase):
         with unittest.mock.patch('getpass.getpass') as prompt:
             self.assertEqual(main(['--state-dir','unused','--source-commit','a'*40]),2)
             prompt.assert_not_called()
+
+    def test_zero_candidate_observation_calls_model_without_retaining_a_candidate(self):
+        from dataclasses import replace
+        for decision,codes in (("REVIEW",["REVIEW_REQUIRED"]),("NO_TRADE",["NO_SIGNAL"])):
+            with self.subTest(decision=decision):
+                transport=Mock();transport.post.return_value=reply(envelope(content=json.dumps(advice(decision=decision,reason_codes=codes))))
+                adviser=CandidateAdviser(BoxAPIClient(api_key=KEY,transport=transport),source_commit='a'*40,
+                    evidence_kind=EvidenceKind.HISTORICAL_DATA,source_hashes={'m1':'b'*64,'h1':'c'*64},
+                    clock=lambda:1800001,assess_observation=True)
+                frame=frame_fixture()
+                frame.candles_15m=tuple(replace(bar,close=bar.open) for bar in frame.candles_15m)
+                result=tp1_decision(frame,adviser=adviser)
+                self.assertFalse(json.loads(result.reason)['technical_eligible'])
+                row=json.loads(result.diagnostics_json)['ai']
+                self.assertEqual(transport.post.call_count,1)
+                self.assertEqual(row['http_status'],200)
+                self.assertEqual(len(row['response_sha256']),64)
+                self.assertFalse(row['retained_for_research'])
+                self.assertEqual(row['advisory_decision'],decision)
+                self.assertEqual(row['assessment_mode'],'TP1_OBSERVATION_RESEARCH_ONLY')
+                context=json.loads(json.loads(transport.post.call_args.args[0].body)['messages'][1]['content'])
+                self.assertEqual(__import__('decimal').Decimal(context['distance_m15']),0)
+                self.assertFalse(context['technical_eligible'])
+                self.assertEqual(result.action.value,'NO_TRADE')
+                self.assertFalse(row['executable_ready'])
+                self.assertNotIn(KEY,json.dumps(row))
+
+    def test_actual_persistence_readback_and_explicit_provider_failures(self):
+        from .tp1_review import persist_review
+        from wallex.audit.ledger import Ledger
+        from wallex.infra.agent_runtime import PARTITION
+        for response,status in ((HttpResponse(401,b'{}'),'AUTHENTICATION_FAILED'),
+            (HttpResponse(403,b'Request limit reached. You have no more API requests left.'),'REQUEST_LIMIT_REACHED'),
+            (HttpResponse(429,b'{}'),'RATE_LIMITED'),(HttpResponse(200,b'{}'),'INVALID_RESPONSE')):
+            with self.subTest(status=status), TemporaryDirectory() as directory:
+                transport=Mock();transport.post.return_value=response
+                adviser=self.adviser(transport)
+                result=tp1_decision(frame_fixture(),adviser=adviser)
+                row=json.loads(result.diagnostics_json)['ai']
+                self.assertEqual(row['status'],status)
+                self.assertEqual(row['http_status'],response.status)
+                self.assertIsNone(row['response_sha256'])
+                report={'records':[row],'action':'NO_TRADE','executable_ready':False}
+                verified=persist_review(directory,report)
+                self.assertTrue(verified['audit_readback_verified'])
+                event=next(e for e in Ledger(Path(directory)/'audit.sqlite').events() if e.event_id==verified['audit_event_id'])
+                self.assertEqual(event.account_id,PARTITION)
+                self.assertEqual(event.payload,report)
+                self.assertNotIn(KEY,event.payload_json)
