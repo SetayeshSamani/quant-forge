@@ -137,6 +137,10 @@ class ProviderTests(unittest.TestCase):
                  (403, json.dumps({"error": {"message": REQUEST_LIMIT_MESSAGE}}), "REQUEST_LIMIT_REACHED"),
                  (403, json.dumps({"message": REQUEST_LIMIT_MESSAGE}), "REQUEST_LIMIT_REACHED"),
                  (403, json.dumps({"error": REQUEST_LIMIT_MESSAGE}), "REQUEST_LIMIT_REACHED"),
+                 (403, json.dumps({"success": False, "data": {"message": REQUEST_LIMIT_MESSAGE}}),
+                  "REQUEST_LIMIT_REACHED"),
+                 (403, json.dumps({"success": False, "data": {"message": "Other denial"}}), "FORBIDDEN"),
+                 (403, json.dumps({"success": False, "data": [REQUEST_LIMIT_MESSAGE]}), "FORBIDDEN"),
                  (403, "prefix " + REQUEST_LIMIT_MESSAGE, "FORBIDDEN"),
                  (403, json.dumps({"message": "Other denial", "detail": REQUEST_LIMIT_MESSAGE}), "FORBIDDEN")]
         for status, body, expected in cases:

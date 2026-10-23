@@ -210,8 +210,10 @@ class BoxAPIClient:
             value = _json(text)
             if type(value) is dict:
                 error = value.get("error")
+                data = value.get("data")
                 return (value.get("message") == REQUEST_LIMIT_MESSAGE or error == REQUEST_LIMIT_MESSAGE
-                        or (type(error) is dict and error.get("message") == REQUEST_LIMIT_MESSAGE))
+                        or (type(error) is dict and error.get("message") == REQUEST_LIMIT_MESSAGE)
+                        or (type(data) is dict and data.get("message") == REQUEST_LIMIT_MESSAGE))
         except (ValueError, UnicodeError, RecursionError):
             pass
         return False
