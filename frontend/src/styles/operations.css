@@ -1,0 +1,21 @@
+.operations-page { display: grid; gap: var(--space); min-width: 0; }
+.operations-page .panel { padding: 16px; }
+.operations-page p { margin: 8px 0; color: var(--text-secondary); }
+.operation-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 14px 0; }
+.operation-fields > div { border: 1px solid var(--border); padding: 10px; border-radius: var(--radius); min-width: 0; }
+.operation-fields dt { color: var(--muted); font-size: 12px; }
+.operation-fields dd { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 700; }
+.operation-reasons { padding-inline-start: 22px; }
+.operation-reasons code { overflow-wrap: anywhere; color: var(--text-secondary); }
+.operations-page pre { direction: ltr; text-align: left; background: var(--surface-raised); padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
+.operation-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.operation-actions button { background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; color: var(--muted); }
+.report-file { display: grid; gap: 8px; margin: 12px 0; color: var(--text); }
+.report-file input { width: 100%; max-width: 550px; color: var(--text-secondary); }
+.operation-safety { border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--negative); padding: 12px; border-radius: var(--radius); text-align: center; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .operations-page .panel-heading { align-items: flex-start; flex-wrap: wrap; } .operations-page .panel-heading h2 { white-space: normal; } .operation-fields { grid-template-columns: 1fr; } }
+
+/* Longer read-only labels must fit without clipping mobile controls. */
+.workspace:has(.operations-page) .header-controls { flex-wrap: wrap; min-width: 0; }
+.workspace:has(.operations-page) .page-heading { min-width: 0; }
+.workspace:has(.operations-page) .page-heading > div { min-width: 0; }
