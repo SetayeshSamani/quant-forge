@@ -532,3 +532,50 @@ synthetic injected responses only. Native H1 collection does not supply M15 and
 is deliberately not accepted by the existing combined-history research command.
 Contiguous-window research and M15 gap handling are separate future tasks.
 No Strategy, Risk, Execution, account or trading behavior is changed.
+
+
+## Offline gap-aware M15 diagnostics
+
+`gap_aware.analyze_minutes(raw_bytes, symbol=..., base_asset=..., quote_asset=...,
+start=..., end=..., as_of=..., volume_unit=None)` analyzes saved UDF M1 bytes;
+no import or command makes network requests. UTC Unix-second `start` is inclusive,
+`end` exclusive, both minute-aligned; the explicit `as_of` must close the entire
+range. Limits: 14 days and a 1 MiB input, matching existing ingestion bounds.
+
+```powershell
+python -B -m wallex.market.gap_aware --analyze --input SAVED_RAW_JSON --symbol BTCUSDT --base BTC --quote USDT --start START_UTC_SECONDS --end END_UTC_SECONDS --as-of CUTOFF_UTC_SECONDS --summary-only
+```
+
+Replace placeholders with the saved request's actual range/cutoff; never infer
+coverage from the first/last returned candle. Omit `--summary-only` to include
+provisional M15 candle bodies. This reads the input unchanged and writes only JSON
+to stdout. Never commit downloaded data or reports containing real datasets.
+
+Every present row is validated through unchanged strict normalization of its
+contiguous source run, even inside an incomplete bucket. Only exactly 15 valid,
+consecutive UTC minute bars produce a M15 candle through the existing aggregator.
+Missing timestamps and incomplete buckets are explicit; consecutive M15 segments
+are separate and must never be concatenated across gaps. At partial range edges,
+`outside_expected_range` distinguishes unrequested minutes from missing source
+minutes. Duplicates, ordering/alignment errors, invalid OHLCV, nonfinite values,
+incomplete/future observations and inconsistent arrays reject the analysis.
+
+Present zero-volume bars keep their original OHLC; they are never treated as
+missing or filtered out. The supplied carry-forward hypothesis is **not** adopted
+as an exchange rule. Volume units default to `UNVERIFIED`; optional
+`--volume-unit base` records `CALLER_ATTESTED_BASE`, without conversion or
+independent verification. Numeric validator reuse does not attest source units.
+Raw byte SHA-256/size and explicit instrument/range metadata preserve provenance;
+source identity remains unauthenticated, including when an echoed symbol matches.
+
+Synthetic QA-pattern test: 600 expected M1, 597 present, 3 missing, 47 present
+zero-volume bars, 38 complete M15, 2 incomplete buckets and 2 separate 19-bar runs.
+The missing times are `1791845940`, `1791846000`, `1791846060`; incomplete bucket
+opens are `1791845100` and `1791846000`. This reproduces supplied findings with
+synthetic bytes, not a new fetch or a claim about native H1 price equivalence.
+
+Partial coverage is `PARTIAL`; even complete coverage is only
+`COVERAGE_COMPLETE_RESEARCH_ONLY`. All reports retain `fully_validated=False`,
+`NO_TRADE` and `executable_ready=False`. This is not a LoadedDataset, shared schema
+or TP-1 adapter. Strict `history.decode_minutes()`, native H1 ingestion, existing
+research/replay, Strategy, Risk, Shadow and Execution behavior are unchanged.
