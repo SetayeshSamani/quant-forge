@@ -33,8 +33,13 @@ preserving data. Restart with the same directory, never another simultaneous
 writer. Check health.source_commit against `$sha`. A snapshot/heartbeat is not
 proof of source event freshness or ongoing process liveness.
 
-Container commands below are prepared, **not successfully verified locally**:
-Docker daemon is available, but Docker Hub Python layer download returned HTTP403.
+Container build and actual public Wallex -> observer -> HTTP API -> React flow
+were verified locally at container8080 (host18080), including 15-second refresh,
+health/source SHA, SIGTERM exit0, persistent /data and restart. The earlier Docker
+Hub HTTP403 no longer reproduces. Python 3.11.17 ran 9 focused integration tests
+from exact archived test source (production images intentionally exclude tests).
+The complete 604-test suite passed on Python 3.14.7; all 11 browser tests, TypeScript
+and production build passed. Liara deployment itself has not been performed.
 
 ```powershell
 # Build from tracked source only; clean status alone ignores local ignored files.
@@ -47,7 +52,7 @@ docker volume create quantforge-public-data
 docker run --name quantforge-release -p 127.0.0.1:8080:8080 --mount source=quantforge-public-data,target=/data quantforge:$sha --host 0.0.0.0 --port 8080 --state-dir /data/observer --frontend-dir /app/frontend/dist --fetch-public --symbol BTCTMN --base BTC --quote TMN --volume-unit base
 # Different terminal, after observing real API/UI results:
 docker inspect --format '{{.Config.Labels}} {{.State.Health.Status}}' quantforge-release
-docker stop --time 60 quantforge-release
+docker stop --timeout 60 quantforge-release
 docker start quantforge-release
 ```
 
@@ -91,8 +96,25 @@ python -B -m wallex.backtest.example --output "$env:LOCALAPPDATA\QuantForge\synt
 Expected fixture-only result: two hypothetical fills, fee0.2 + slippage0.4 =
 loss0.6 generic QUOTE, matching Shadow decisions. Existing tests independently
 check this arithmetic. No take-profit, exit policy or genuine strategy profit is
-invented. AI is NOT contributing: existing client gates block unverified risk/
-credit; no provider call or credential is required for any command above.
+invented. No provider call or credential is required for any command above. Optional AI
+research review below is separate from these deterministic backtest/Shadow runs.
+
+## Optional actual AI candidate review (owner only)
+
+```powershell
+python -B -m wallex.ai_provider.tp1_review --state-dir $state --source-commit $sha --review-ai
+```
+
+Use the same observer `$state` and exact reviewed `$sha` as above. This revalidates
+saved sources and actual TP-1 cutoffs before a hidden BoxAPI key prompt. No key is
+requested and no provider call occurs when there is no technical candidate. One
+call maximum per invocation, no retries. Re-running is another explicit opt-in
+and can incur another provider request. Never paste the key in arguments/chat.
+Only the safe final JSON may be shared. Its public audit record is displayed in
+Decision Center on the next refresh; restart an older API process to load this
+release first. Actual status/model/hash/time prove only historical research advice,
+not execution approval. Original risk-gated advice remains unchanged. No real
+inference, quota availability or score is claimed before the recorded result.
 
 ## Source/video/evidence submission
 

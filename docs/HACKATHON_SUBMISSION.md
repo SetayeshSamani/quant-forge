@@ -54,21 +54,28 @@ but this does not establish trading permission, complete exposure or equity.
 | Nonzero fee/slippage accounting | Existing separately labelled SYNTHETIC two-action harness | Two hypothetical fills, fee 0.2, slippage 0.4, net -0.6 QUOTE; not TP-1 profit or account evidence |
 | Timestamped rejection/audit trail | Shadow events carry cutoff/run/event IDs; public observer SQLite records lifecycle/decisions | Local public partition is not an exchange account; no real-order journal claimed |
 | Connected frontend/API | Native port 8080 /health, /observer and UI; 15-second refresh tests | Private account endpoints absent; authentication required before adding them |
-| Tests | Full 599 Python tests and 11 browser tests passed; TypeScript/build passed | Python runtime 3.14.7; 3.11 syntax checked, container runtime not verified |
-| Docker/Liara | Dockerfile, OCI revision, healthcheck, SIGTERM, /data instructions | Docker daemon started; official Python layer pull returned HTTP403, image startup NOT verified |
-| Safe stop/persistence | Native Ctrl+C recorded STOPPED and preserved public observations; SIGTERM handler regression | Container stop/restart not verified because image pull failed |
-| AI | Existing bounded BoxAPI client and mock tests reviewed | Actual candidate contribution NONE; no live provider call or AI performance claim |
+| Tests | Full 604 Python tests and 11 browser tests passed; TypeScript/build passed | Python runtime 3.14.7; all 604 passed with zero failures/errors/skips; 9 focused integrated tests also passed on container Python 3.11.17 |
+| Docker/Liara | Dockerfile, OCI revision, healthcheck, SIGTERM, /data instructions | Official image pull/build now succeeded; actual public collection/API/UI/refresh on container8080 verified. Liara not deployed |
+| Safe stop/persistence | Native Ctrl+C recorded STOPPED and preserved public observations; SIGTERM handler regression | Docker SIGTERM exit0, persisted /data observation and restart verified |
+| AI research veto | Actual offline TP-1 -> bounded BoxAPI structured REVIEW/NO_TRADE -> hash/timestamp/model audit -> Decision Center | Mock integration verified; real inference remains UNAVAILABLE until owner-run evidence. REVIEW is never trading approval |
 
-## AI status ? no misleading agent claim
+## AI status — evidence required
 
-TP-1 candidates are deterministic. The BoxAPI client is isolated and not called
-by the observer, candidate evaluator or Shadow provider. Its contract requires
-VERIFIED data quality, risk and credit before any request. Real credit/risk and
-source-event freshness are unverified here, so attaching the provider by inventing
-VERIFIED states would bypass an existing guard. No such integration was made.
-Provider quota/availability is also unverified; an owner-reported prior request
-limit 403 is not success evidence. Mock tests prove client bounds/fail-closed
-handling, not actual model contribution. No API key was requested or used.
+`wallex.ai_provider.tp1_review` revalidates saved public source hashes and calls
+existing TP-1/Shadow diagnostics. Only an actual technical candidate can reach
+BoxAPI, at most one unique call per invocation, with exact Decimal strings and
+no account data. REVIEW retains a research candidate; NO_TRADE vetoes it. Counts
+are separate from deterministic technical eligibility. Risk/credit stay UNVERIFIED;
+the original gated `advise()` behavior and all execution controls are unchanged.
+
+Owner opt-in uses a hidden local key prompt. Model, evidence/source hashes,
+cutoff, request/completion timestamps, structured reason codes and source commit
+are journaled, never keys, headers or raw replies. Timeout, quota/auth failure or
+malformed output leaves the candidate unreviewed, never approved. Decision Center
+labels synthetic transports separately and displays historical evidence without
+claiming current market freshness. No genuine inference is claimed until its
+owner-run result exists. Socket timeout is bounded; a hard total network deadline
+and managed production credential provisioning remain limitations.
 
 ## Live execution assessment ? NO-GO
 
@@ -76,10 +83,10 @@ handling, not actual model contribution. No API key was requested or used.
 | --- | --- |
 | Dedicated Hackathon account and key | Owner-attested prop key; discovery/scoped read responses 200. Independent response-account echo and key trade ACL not verified by those reads |
 | Funds, fees, limits, exposure | Positive quote flag only, never equity. Actual fee funding, min/max notional/quantity, tick/lot rules, credit eligibility and complete/atomic open-order/exposure coverage unresolved |
-| Risk admission | All current assessments diagnostic; executable_ready=False, no approved current decision/admission token |
+| Risk admission | Checked synthetic replay reuses sizing/loss/portfolio pipeline, Pe, quote age, explicit scope/ACL/market assertions, fee funding, instrument limits and self-trade checks. All real attestations remain unavailable |
 | Durable IDs and intent | Stable replay identities exist; Ledger enforces mode='replay'. No reviewed durable LIVE intent/submission path |
-| Fills and crash recovery | Venue-stable fill identity, uncertain-submit recovery, deduplication and balances/order/settlement reconciliation unresolved |
-| Stops/exits and credit | Proposed stop calculation exists; no real exit monitoring/order lifecycle, expiry/liquidation management or restart recovery |
+| Fills and crash recovery | Replay integration verifies lost-response recovery, partial fills and no duplicate submission using existing durable IDs. Real venue identities, account reconciliation and settlement remain unresolved |
+| Stops/exits and credit | Read-only replay stop monitor uses deduplicated confirmed fills minus base fees and blocks on unresolved entry/exit/settlement. No live SELL adapter or credit-expiry/liquidation lifecycle |
 | TMN settlement | No IRR/TMN conversion is inferred; actual fee/settlement currency, debit timing and authoritative settled funds require verification |
 | Local activation | NOT APPROVED. No speculative order, cancellation, transfer or account write is sent |
 
@@ -90,17 +97,17 @@ explicit owner authorization. Ship tonight without claiming the unimplemented
 October 26 is subject to official competition rules and these gates, never an
 automatic background activation.
 
-## Five-minute demonstration
+## متن دموی پنج‌دقیقه‌ای
 
-| Time | Recording |
+| زمان | متن و نمایش |
 | --- | --- |
-| 0:00?0:35 | Problem, honest scope, architecture. State NO_TRADE and absence of live performance |
-| 0:35?1:25 | Default connected dashboard, API health/source revision, real public counts/prices/cutoff and refresh; private fields unavailable |
-| 1:25?2:15 | Decision Center: actual H1/M15 reasons and technical candidate distinction. Explain trend, pullback and proposed stop formulas |
-| 2:15?3:10 | Evidence manifest, source hashes, real Shadow timestamped rejection journals, matching diagnostic backtest. Show separate SYNTHETIC cost harness with fees/slippage, not profit claims |
-| 3:10?3:50 | Risk/Credit and exact live blockers; owner-run read access is not order permission; AI contribution explicitly NONE |
-| 3:50?4:30 | Health/lifecycle, safe stop/persistent evidence, tests; state Docker registry403 blocker and deployment status truthfully |
-| 4:30?5:00 | Reviewed source SHA, source/evidence archives, reproducibility commands and final limitations. Show deployed URL only after actual verification |
+| ۰:۰۰–۰:۳۵ | «QuantForge مسیر دادهٔ واقعی تا ارزیابی قابل حسابرسی TP-1 را نشان می‌دهد. معاملهٔ واقعی فعال نیست و سود یا امتیاز ساختگی گزارش نمی‌کنیم.» معماری را نشان دهید. |
+| ۰:۳۵–۱:۲۵ | داشبورد پیش‌فرض، health و SHA نسخه، تعداد واقعی H1/M15، bid/ask و cutoff را نمایش دهید. «refresh هر ۱۵ ثانیه است؛ موجودی و سود خصوصی ناموجودند.» |
+| ۱:۲۵–۲:۱۵ | مرکز تصمیم و علت هر رد را نشان دهید. «روند H1، کراس M15 و فاصلهٔ ATR باید هم‌زمان معتبر باشند. کاندیدای فنی مجوز معامله نیست؛ Pe از close حدس زده نمی‌شود.» |
+| ۲:۱۵–۳:۰۰ | manifest، hash منبع و ژورنال Shadow/Backtest را نشان دهید. «کارمزد و slippage فرض شبیه‌سازی‌اند؛ صفر fill اثبات سودآوری نیست.» مثال دو fill فقط SYNTHETIC را جدا معرفی کنید. |
+| ۳:۰۰–۳:۴۰ | پنل AI را باز کنید. فقط در صورت وجود inference واقعی، مدل/hash/زمان و REVIEW یا وتو را نشان دهید؛ در غیر این صورت صریحاً «AI ناموجود است؛ تست mock اثبات inference واقعی نیست.» |
+| ۳:۴۰–۴:۲۰ | «خواندن حساب ۲۰۰ بوده، اما مجوز معامله، fee، پوشش سفارش‌ها و تسویه تأیید نیست. پذیرش replay، partial fill و crash recovery تست شده؛ خروج واقعی و فعال‌سازی ممنوع باقی مانده‌اند.» |
+| ۴:۲۰–۵:۰۰ | تست‌ها، پایداری /data، shutdown و تطابق SHA منبع با health/image را نشان دهید. وضعیت واقعی Docker/Liara را بگویید؛ فقط URL واقعاً بررسی‌شده را نمایش دهید. پایان: محدودیت‌ها و دستورات بازتولید. |
 
 ## Final submission actions (owner/reviewer)
 
@@ -109,9 +116,10 @@ automatic background activation.
 2. Merge that stable PR only after approval; no squash/rebase/force push required.
    Select and check out the exact stable commit on the build machine. Re-run the
    commands in RELEASE_REPRODUCIBILITY.md and stamp artifacts/image with that SHA.
-3. Resolve Docker Hub layer HTTP403 on the build host using authorized registry
-   access or an owner-approved source, then verify image startup, /data persistence,
-   API/frontend refresh and stop on Liara. No TLS/authentication workaround is used.
+3. Deploy the reviewed exact-SHA Docker image to Liara: port8080, one instance,
+   persistent /data and explicit public-fetch command. Local container startup,
+   collection, refresh and stop/restart passed; repeat health/source checks on the
+   actual deployed URL. No credentials or private APIs belong in this public app.
 4. Record approximately five minutes; verify source SHA equals served health/image
    revision and evidence manifest. Upload source and video before **2026-10-23
    23:50 Asia/Tehran**. Public URL, portal upload and rule compliance are manual;

@@ -57,12 +57,13 @@ def _decision(record):
     return {"technical_eligible": technical["technical_eligible"],
             "technical_reasons": technical["reasons"],
             "technical_evidence": detail["technical_evidence"],
-            **reasons, "blockers": sorted(set(blockers))}
+            **reasons, "blockers": sorted(set(blockers)),
+            **({"ai": detail["ai"]} if "ai" in detail else {})}
 
 
 def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
                 m1_start, m1_end, h1_start, h1_end, as_of,
-                evidence_kind, volume_unit=None):
+                evidence_kind, volume_unit=None, adviser=None):
     """Read two raw public UDF responses; never fetch, infer Pe or supply accounts.
 
     Ranges are explicit UTC OPEN seconds, end exclusive; as_of closes both files.
@@ -131,7 +132,7 @@ def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
                     local_blockers[f"frame:{error.code.value}:{error.dataset}"] += 1
                     continue
                 shadow = run_tp1_shadow(plan, strategy_version="tp1-offline-integration-v1",
-                                        evidence_kind=evidence_kind)
+                                        evidence_kind=evidence_kind, adviser=adviser)
                 record = shadow.evaluations[0]
                 result = _decision(record)
                 counts["replay_errors"] += int(record.error_code is not None)
@@ -145,6 +146,12 @@ def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
             row["blocking_reason_counts"] = dict(sorted(local_blockers.items()))
             blockers.update(local_blockers)
             segments.append(row)
+    if adviser is not None:
+        reviewed = [step["ai"] for step in steps if step.get("technical_eligible") and "ai" in step]
+        counts["ai_reviewed_candidates"] = sum(row.get("status") == "OK" for row in reviewed)
+        counts["ai_retained_candidates"] = sum(row.get("status") == "OK" and row.get("retained_for_research") is True for row in reviewed)
+        counts["ai_vetoed_candidates"] = sum(row.get("status") == "OK" and row.get("advisory_decision") == "NO_TRADE" for row in reviewed)
+        counts["ai_unavailable_candidates"] = sum(row.get("status") != "OK" for row in reviewed)
     return {
         "mode": "OFFLINE_TP1_INTEGRATION", "evidence_kind": evidence_kind.value,
         "instrument": gap["instrument"], "as_of": as_of, "timestamp_semantics": "UTC_OPEN_SECONDS",

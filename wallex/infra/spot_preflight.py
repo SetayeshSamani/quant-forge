@@ -9,6 +9,7 @@ import re
 import ssl
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
@@ -28,7 +29,7 @@ BASE_BLOCKERS = (
     "RESPONSE_ACCOUNT_SCOPE_NOT_INDEPENDENTLY_ECHOED", "ACTUAL_FEES_UNVERIFIED",
     "FULL_ORDER_LIMITS_AND_CREDIT_MARKET_ELIGIBILITY_UNVERIFIED",
     "STRATEGY_RISK_APPROVAL_AND_ACCOUNT_RECONCILIATION_REQUIRED",
-    "LIVE_LEDGER_ADMISSION_EXIT_AND_FILL_RECOVERY_UNIMPLEMENTED",
+    "LIVE_EXECUTION_NOT_ACTIVATED_AND_ACCOUNT_PROOFS_PENDING",
     "LOCAL_REAL_MONEY_ACTIVATION_NOT_APPROVED",
 )
 
@@ -320,6 +321,40 @@ def _select_account(options):
     return options[index - 1]
 
 
+def check_configured_account(settings, *, transport=None, market_get=None, clock=None, discover_account=False, env_file=None):
+    """Exact .env account binding, never main fallback or key prompts.
+
+    Explicit discovery opt-in may save the sole active prop ID returned under
+    the owner's dedicated hackathon key. It is not proof of trade permission.
+    """
+    if not settings.wallex_api_key:
+        return _report() | {"blockers":["WALLEX_API_KEY_MISSING"]}
+    base,quote=settings.assets
+    def select(options):
+        if settings.wallex_subaccount_id:
+            matches=[o for o in options if o.sub_account_client_id==settings.wallex_subaccount_id]
+            if len(matches)!=1:raise ValueError("CONFIGURED_PROP_ACCOUNT_NOT_UNIQUE_OR_ACTIVE")
+            return matches[0]
+        if not discover_account:raise ValueError("WALLEX_SUBACCOUNT_ID_REQUIRED")
+        if len(options)!=1:raise ValueError("MULTIPLE_PROP_ACCOUNTS_REQUIRE_LOCAL_SELECTION")
+        from .config import ROOT
+        path=Path(env_file) if env_file is not None else ROOT/'.env'
+        raw=path.read_bytes()
+        # Change only an explicitly empty field; no key, backup or raw response is stored.
+        pattern=rb'(?m)^(WALLEX_SUBACCOUNT_ID[ \t]*=[ \t]*)(?:""|\'\')?[ \t]*(?=\r?$)'
+        if len(re.findall(pattern,raw))!=1:raise ValueError("EMPTY_SUBACCOUNT_FIELD_REQUIRED_FOR_SAFE_SAVE")
+        updated=re.sub(pattern,lambda match:match[1]+options[0].sub_account_client_id.encode('ascii'),raw,count=1)
+        with path.open('r+b') as stream:
+            if stream.read()!=raw:raise ValueError("ENV_CHANGED_DURING_DISCOVERY")
+            stream.seek(0);stream.write(updated);stream.truncate()
+        return options[0]
+    options={"connect":True,"resolve_credential":lambda _:settings.wallex_api_key,"select_account":select,
+             "symbol":settings.wallex_symbol,"base_asset":base,"quote_asset":quote,"transport":transport,
+             "market_get":market_get}
+    if clock is not None:options["clock"]=clock
+    return check_account(**options)
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         print(canonical_json(_report() | {"blockers": ["INVALID_ARGUMENTS"]}))
@@ -329,15 +364,22 @@ class _Parser(argparse.ArgumentParser):
 def main(argv=None):
     parser = _Parser(description=__doc__)
     parser.add_argument("--connect", action="store_true", required=True)
+    parser.add_argument("--env-file",type=Path)
+    parser.add_argument("--discover-account",action="store_true",help="Save only a unique active prop identity to an empty .env field")
     for name in ("symbol", "base", "quote"):
-        parser.add_argument("--" + name, required=True)
-    args = parser.parse_args(argv)
-    if not sys.stdin.isatty() or not sys.stderr.isatty():
-        report = _report() | {"blockers": ["INTERACTIVE_TERMINAL_REQUIRED"]}
-    else:
-        report = check_account(connect=args.connect, resolve_credential=_prompt_credential,
-                               select_account=_select_account, symbol=args.symbol,
-                               base_asset=args.base, quote_asset=args.quote)
+        parser.add_argument("--"+name)
+    args=parser.parse_args(argv)
+    try:
+        from .config import load_settings
+        settings=load_settings(args.env_file)
+        if args.symbol is not None and args.symbol!=settings.wallex_symbol:
+            raise ValueError("CONFIGURED_MARKET_MISMATCH")
+        base,quote=settings.assets
+        if args.base is not None and args.base!=base or args.quote is not None and args.quote!=quote:
+            raise ValueError("CONFIGURED_MARKET_MISMATCH")
+        report=check_configured_account(settings,discover_account=args.discover_account,env_file=args.env_file)
+    except Exception:
+        report=_report()|{"blockers":["CONFIGURATION_INVALID_OR_UNAVAILABLE"]}
     print(canonical_json(report))
     return 0 if report["authenticated_reads_succeeded"] else 1
 

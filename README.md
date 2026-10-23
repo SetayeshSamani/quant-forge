@@ -1,3 +1,25 @@
+## Local persistent-credential demo
+
+Python 3.11+, Node.js 22.12+ and Windows PowerShell are required. Keep the owner's
+root `.env` local; use `.env.example` only when creating a new configuration.
+Process environment overrides `.env`, which overrides defaults. Keys are loaded
+in backend memory on every restart, never exported to npm or the browser.
+
+```powershell
+./start-demo.ps1           # Public observer + read-only account check + one real AI assessment
+./stop-demo.ps1            # Cooperative shutdown; all evidence and audit data retained
+```
+
+Open `http://127.0.0.1:8080` (or configured `BACKEND_PORT`). `DATA_DIR` persists
+observations/audit across launches. Initial account/AI checks run once per launch;
+API refresh does not repeat paid inference. Private amounts/IDs remain server-side.
+`TRADING_MODE` labels configuration only: this demo always remains **NO_TRADE**,
+including when LIVE flags are configured. HTTPS BUY/SELL, recovery and fee-aware
+settlement are implemented and mock-tested, but actual submission remains blocked
+by missing reviewed permission, credit/fee policies, maximum venue limits,
+source-event quote freshness and verified equity/loss history. Explicit execution
+admission reuses the unchanged diagnostic Risk checks; it does not manufacture evidence. A limit-based protective exit cannot guarantee a fill.
+
 # QuantForge — Wallex Agentic AI Hackathon
 
 QuantForge demonstrates a cost-aware TP-1 Trend Pullback workflow with explicit
@@ -25,6 +47,10 @@ Saved public data → validation/independent consecutive segments → TP-1 techn
 assessment → risk/credit diagnostics → Shadow journal → **NO_TRADE**.
 The default frontend polls the real read-only Python observer API every 15
 seconds. It displays actual public-market/TP-1 reports, health and blockers.
+Optional owner-run AI review evaluates actual TP-1 candidates as research-only
+REVIEW/veto, with model/hash/timestamp evidence in Decision Center. Missing real
+provider evidence is UNAVAILABLE; mock results are labelled synthetic. Checked
+replay admission reuses risk controls; stop monitoring never submits exits.
 Private balances, credit, orders and profit stay unavailable. The legacy synthetic
 presentation/manual importer exists only at the explicit `?view=demo` URL.
 No credentials or private Wallex requests run in the browser. See the
@@ -54,19 +80,20 @@ checks: `npm test` with Playwright Chromium installed, or set
 A real-public-market worker now reuses the existing TP-1/Shadow diagnostics with
 persistent Audit events, run-once/continuous modes and controlled shutdown.
 It remains NO_TRADE; independent authenticated account READ preflight is a
-separate owner-run hidden prompt, without package/user IDs or the active-plan route:
+separate `.env`-configured check, without package/user IDs or the active-plan route:
 
 ```powershell
 python -B -m wallex.infra.spot_preflight --connect --symbol BTCTMN --base BTC --quote TMN
 ```
 
-Select the intended discovered prop account with `HACKATHON N`; verify the masked
-identity locally. Both dedicated credit key and account header are used for scoped
+Configure the explicitly verified prop account in `WALLEX_SUBACCOUNT_ID`. When empty,
+`--discover-account` accepts only one active, unsuspended prop account and fills only
+that empty field; ambiguous identities fail closed. Both key and account header are used for scoped
 balance/order reads. No main-account fallback, write operation or order test exists.
 Read success never grants trade permission or risk approval.
 See [startup, preflight, status and durable-worker requirements](docs/AGENT_RUNTIME.md).
-Live trading is blocked by unapproved risk/admission, replay-only storage/execution,
-missing real exit/reconciliation contracts and unverified account/fee/market evidence.
+Live trading remains blocked by unapproved risk/admission, unverified complete fill/
+account coverage, fees/market rules and an inactive owner-approved exit/recovery policy.
 
 ## Offline Python evidence
 
@@ -155,5 +182,6 @@ The existing fee-aware engine and TP-1 Shadow are composed by
 `python -B -m wallex.shadow.release_evidence --help`; real market files stay
 outside Git and retain hashes/cutoffs. Simulation costs/capital are explicit
 assumptions. TP-1 remains NO_TRADE; no live performance or actual AI contribution
-is claimed. Docker Hub layer HTTP403 currently blocks local image verification;
+is claimed. Docker build, public collection, API/UI refresh and persistent stop/restart are
+verified locally;
 native port8080 UI/API/collection and controlled stop/persistence were checked.

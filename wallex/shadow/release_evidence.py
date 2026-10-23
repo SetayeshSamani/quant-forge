@@ -23,19 +23,8 @@ from .tp1 import run_tp1_shadow, tp1_decision
 VERSION = "tp1-release-evidence-v1"
 
 
-def build_evidence(observation_dir, output, *, symbol, base, quote, as_of, source_commit, simulation):
-    """Hash-pin supplied public files; capital/costs are simulation assumptions.
-
-    No Pe, account, equity, quote freshness or execution permission is invented.
-    Existing TP-1 returns NO_TRADE: zero simulated fills is not profitability proof.
-    """
-    if re.fullmatch(r"[0-9a-f]{40}", source_commit or "") is None or type(simulation) is not SimulationConfig:
-        raise ValueError("EXPLICIT_SOURCE_COMMIT_AND_SIMULATION_REQUIRED")
-    if type(as_of) is not int or as_of < 0 or as_of % 900:
-        raise ValueError("INVALID_EXPLICIT_CUTOFF")
-    output = Path(output).resolve()
-    if output.is_relative_to(Path(__file__).resolve().parents[2]) or output.exists():
-        raise ValueError("NEW_OUTPUT_OUTSIDE_REPOSITORY_REQUIRED")
+def read_public_source(observation_dir, *, symbol, as_of):
+    """Validate the existing observer source packet before any downstream use."""
     source=Path(observation_dir)
     raw=_decode(_read(source/'report.json'))
     projected=_observation(raw,symbol)
@@ -60,6 +49,25 @@ def build_evidence(observation_dir, output, *, symbol, base, quote, as_of, sourc
         if sha256(payload).hexdigest() != request['raw_sha256'] or request['http_status'] != 200:
             raise ValueError("PUBLIC_SOURCE_HASH_OR_STATUS_MISMATCH")
         ranges[name]=(start,end,payload)
+    return raw, projected, ranges
+
+
+def build_evidence(observation_dir, output, *, symbol, base, quote, as_of, source_commit, simulation):
+    """Hash-pin supplied public files; capital/costs are simulation assumptions.
+
+    No Pe, account, equity, quote freshness or execution permission is invented.
+    Existing TP-1 returns NO_TRADE: zero simulated fills is not profitability proof.
+    """
+    if re.fullmatch(r"[0-9a-f]{40}", source_commit or "") is None or type(simulation) is not SimulationConfig:
+        raise ValueError("EXPLICIT_SOURCE_COMMIT_AND_SIMULATION_REQUIRED")
+    if type(as_of) is not int or as_of < 0 or as_of % 900:
+        raise ValueError("INVALID_EXPLICIT_CUTOFF")
+    output = Path(output).resolve()
+    if output.is_relative_to(Path(__file__).resolve().parents[2]) or output.exists():
+        raise ValueError("NEW_OUTPUT_OUTSIDE_REPOSITORY_REQUIRED")
+    source=Path(observation_dir)
+    raw,projected,ranges=read_public_source(source,symbol=symbol,as_of=as_of)
+    evidence_kind=EvidenceKind(raw['pipeline']['evidence_kind'])
     m1_start,m1_end,m1=ranges['m1']
     h1_start,h1_end,h1=ranges['h1']
     offline=run_offline(source/'m1.json',source/'h1.json',symbol=symbol,base_asset=base,quote_asset=quote,
@@ -112,7 +120,7 @@ def build_evidence(observation_dir, output, *, symbol, base, quote, as_of, sourc
         'symbol':symbol,'base_asset':base,'quote_asset':quote,'as_of':as_of,
         'simulation_assumptions':simulation,'volume_assumption':'CALLER_ATTESTED_BASE_NOT_VERIFIED',
         'technical_summary':offline['summary'],'runs':runs,
-        'ai':{'actual_candidate_contribution':'NONE','provider_calls':0,'reason':'NOT_CONNECTED_AND_RISK_CREDIT_UNVERIFIED'},
+        'ai':{'actual_candidate_contribution':'NONE','provider_calls':0,'reason':'AI_REVIEW_NOT_REQUESTED_IN_THIS_OFFLINE_RUN'},
         'limitations':['NO_EXECUTABLE_TP1_ENTRY_OR_EXIT_POLICY','ZERO_FILLS_NOT_PROFITABILITY_EVIDENCE',
                       'SIMULATED_CAPITAL_NOT_ACCOUNT_EQUITY','FEES_SLIPPAGE_NOT_VERIFIED_ACCOUNT_COSTS'],
         'action':'NO_TRADE','executable_ready':False,

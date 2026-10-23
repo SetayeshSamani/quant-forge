@@ -56,6 +56,8 @@ class AdvisoryResult:
     requested_model: str
     response_model: str | None = None
     usage: TokenUsage | None = None
+    http_status: int | None = None
+    response_sha256: str | None = None
     provider: str = field(default="BoxAPI", init=False)
     version: str = field(default=VERSION, init=False)
     executable: bool = field(default=False, init=False)

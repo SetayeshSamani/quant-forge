@@ -76,3 +76,77 @@ after restart and finds the original order using the same client ID. The output
 keeps unknown quantities null, reservations held and sellable balance unknown.
 The temporary database is removed when the example finishes. The example never
 opens an existing account database or contacts an exchange.
+
+## Scoped HTTPS gateway (disabled by default)
+
+`WallexExchange` in `wallex_http.py` supplies real fixed-origin HTTPS operations:
+POST orders (LIMIT BUY/SELL), GET order by persisted client ID, DELETE orders
+by `/v1/account/orders/{client_id}`, and GET openOrders/trades/balances-detail. No redirects,
+ambient proxies, retry, credential files, main-account fallback or automatic calls.
+Official contracts: https://api-docs.wallex.ir/ and
+https://developers.wallex.ir/docs/spot-intro and
+https://developers.wallex.ir/docs/spot-cancel-order . The current path cancellation
+contract is used, without a fallback write to the older query contract.
+
+`WallexGateway` reuses ReplayGateway's durable state machine. Construct a separate
+`Ledger(path, mode=Mode.LIVE)`; existing replay databases are refused, never migrated.
+Default ReplayGateway still rejects LIVE. Before a new write, authorization must
+bind the exact request, current strict Risk pipeline result, approved stop/cost
+policy, explicit fee currency, instrument limits, fresh balances/quote and reviewed
+prerequisite evidence hashes. An exact order-fingerprint-bound explicit owner confirmation is mandatory
+(`AUTHORIZE WALLEX SUBMIT <request fingerprint>`; cancellation uses `CANCEL`). There is no --live flag, environment activation or background trader.
+The proof hashes are trusted-backend evidence references, not self-verifying claims;
+the existing read-only preflight cannot manufacture missing permission/fee/coverage
+or risk authorization. No production evidence producer for those missing facts is
+claimed. Fresh authenticated sub-account scope and balance reads are rechecked.
+Actual HTTPS POST/DELETE also require a short-lived account/client-bound permit.
+
+`authorize_entry -> submit -> reconcile/recover_account -> cancel (if partial) ->
+authorize_exit -> submit -> reconcile -> settle` uses the same SQLite intent/fill
+tables. Local fill IDs hash each per-order economic row plus identical-row occurrence;
+they are NOT venue fill IDs. Full snapshot quantity must match executedQty. Unassigned
+account trades never supply guessed fills. Rejection, malformed/missing fills, fees,
+404, timeout or conflicting observations fail closed; uncertain POST is never retried.
+Protective SELL is bound to confirmed acquired base (minus fees), persisted stop,
+explicit price floor and current exposure. Exact terminal base/quote balance deltas
+including fees are required before releasing reservations. TMN is not converted to IRR;
+any dust, external movement or frozen funds blocks settlement. Mock status is MOCK_SETTLED.
+
+Focused network-mock verification:
+`python -B -m unittest wallex.execution.test_wallex_live -q`.
+No real order has been sent. `risk/live_admission.py` provides a separate explicit
+execution-admission check reusing the unchanged diagnostic pipeline and Risk Gate.
+Real transport requires current collected venue evidence, reviewed permission/credit/
+fee-asset/equity artifacts, persisted daily-loss/high-water state, source-event-fresh
+quotes, and a hash-matched genuine AI REVIEW read back from the existing Audit ledger.
+A pass alone never authorizes a POST. Missing evidence and AI veto fail closed.
+Sticky loss breaches survive recovery and explicit UTC day changes; wallet balance
+is never substituted for equity. The demo does not create these reviewed artifacts.
+
+Read-only readiness (existing root .env; no prompt, order, package activation or fallback):
+`python -B -m wallex.execution.preflight --connect`.
+Actual GET checks verified maker/taker rates, decimal increments/minimums, and two
+matching account captures. `orders/trades` return `has_more_pages=false`; the unusual
+empty `openOrders` page (`per_page=0`) alone proves nothing and is cross-checked against
+the complete bounded all-orders capture. This is not atomic exchange admission.
+Official v1 market docs: https://api-docs.wallex.ir/ . `stepSize`/`tickSize` count decimal
+places; `isMarketTypeEnable` is not interpreted as permission for the prop account.
+
+External evidence still required: documented GETs inspected do not expose key trade
+ACL, fee debit-asset guarantees, or credit loan/collateral/expiry authorization.
+BTCTMN `maxQty` is not returned; public `/v1/depth` contains no market event timestamp.
+Wallex must provide account-bound permission/eligibility, missing limit/fee policy
+and a timestamped executable quote contract. No permission is inferred from GET 200.
+No exact order ticket is issued while these facts or independent equity history are absent.
+
+Reproducible isolated HTTP simulation (never actual credentials or network):
+`python -B -m wallex.execution.simulation --simulate`.
+It exercises the actual gateway/ledger: timeout -> recovery -> partial/full BUY ->
+protective SELL -> fee-aware TMN settlement. The demo additionally shows a partial
+SELL, explicit cancellation, residual exit, and settlement across all child fills.
+Repeated submits of an identical durable request return its receipt without reposting,
+including after restart when the account is no longer flat. Confirmed canceled exit
+reservations may release only their residual hold; parent exposure stays held.
+Stop inspection pauses entries on gaps, uncertain exits and timeouts. A LIMIT sell
+can remain unfilled; cancellation/repricing outside a separately approved exact
+procedure is not automatic. `inspect_protection` never submits orders.

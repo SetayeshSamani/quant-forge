@@ -87,7 +87,10 @@ class Ledger:
     schema versions are refused. No existing database is replaced or migrated.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, mode: Mode = Mode.REPLAY):
+        if mode not in (Mode.REPLAY, Mode.LIVE):
+            raise ContractError("Explicit replay or live ledger mode required.")
+        self.mode = mode
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._transaction() as db:
@@ -100,8 +103,12 @@ class Ledger:
                 row = db.execute("SELECT value FROM ledger_meta WHERE key='schema_version'").fetchone()
                 if row is None or row[0] != AUDIT_SCHEMA_VERSION:
                     raise LedgerError("Unsupported ledger schema; no automatic migration is available.")
+            if "intents" in tables:
+                ddl = db.execute("SELECT sql FROM sqlite_master WHERE name='intents'").fetchone()[0]
+                if "CHECK(mode='" + mode.value + "')" not in ddl:
+                    raise LedgerError("Ledger mode mismatch; use a separate database, never migrate replay into live.")
             for statement in _SCHEMA:
-                db.execute(statement)
+                db.execute(statement.replace("CHECK(mode='replay')", "CHECK(mode='" + mode.value + "')"))
             db.execute("INSERT OR IGNORE INTO ledger_meta VALUES ('schema_version', ?)",
                        (AUDIT_SCHEMA_VERSION,))
 
@@ -291,7 +298,8 @@ class Ledger:
                     intent.account_id, intent.client_id, intent.symbol, intent.base_asset, intent.quote_asset,
                     observation.source_order_id, observation.source):
                 raise ObservationError("Fill identity or units do not match this order/source.")
-            if intent.side == Side.BUY and fill.price_quote_per_base > intent.price_quote_per_base:
+            if (intent.side == Side.BUY and fill.price_quote_per_base > intent.price_quote_per_base
+                    or intent.side == Side.SELL and fill.price_quote_per_base < intent.price_quote_per_base):
                 raise ObservationError("Fill price violates the persisted buy limit.")
             if fill.fee_asset == intent.base_asset and fill.fee_amount > fill.quantity_base:
                 raise ObservationError("Base fee exceeds this fixture's acquired fill quantity.")
@@ -361,6 +369,8 @@ class Ledger:
                        (observation.state.value, observation.source_order_id,
                         decimal_text(observation.cumulative_filled_quantity),
                         json_value(observation.observed_at), intent_id))
+            if self.mode is Mode.LIVE and observation.state is OrderState.REJECTED:
+                db.execute("UPDATE intents SET reservation_held=0 WHERE intent_id=?",(intent_id,))
             self._event(db, "order_observed", account_id=intent.account_id, run_id=intent.run_id,
                         trace_id=intent.trace_id, at=at, intent_id=intent_id,
                         payload={"observation": observation, "version": expected_version + 1})
@@ -394,7 +404,8 @@ class Ledger:
                                     record.request.fingerprint, record.request.references,
                                     intent.base_asset, intent.quote_asset, intent.quantity_base,
                                     filled, remaining, observation, fills, record.request.reservation,
-                                    record.reservation_held, record.uncertainty_reason, net, net_reason)
+                                    record.reservation_held, record.uncertainty_reason, net, net_reason,
+                                    reconciliation_scope="request_scoped_order_only" if self.mode is Mode.LIVE else "synthetic_order_only")
 
     def events(self, intent_id: str | None = None) -> tuple[AuditEvent, ...]:
         with self._transaction() as db:
@@ -415,7 +426,7 @@ class Ledger:
         if not isinstance(request, ExecutionRequest):
             raise ContractError("Expected the typed execution consumer request.")
         request = ExecutionRequest.from_dict(request.to_dict())
-        if (request.intent.mode != Mode.REPLAY or request.risk_decision.allowed is not True
+        if (request.intent.mode != self.mode or request.risk_decision.allowed is not True
                 or request.risk_decision.reason != RiskReason.WITHIN_LIMITS):
             raise ContractError("Only validated synthetic replay requests can reserve an order.")
         intent, reservation = request.intent, request.reservation
@@ -441,3 +452,44 @@ class Ledger:
                                  "reservation": reservation, "references": request.references})
             row = db.execute("SELECT * FROM intents WHERE intent_id=?", (intent.intent_id,)).fetchone()
             return self._record(row), True
+
+    def release_live_round_trip(self, intent_ids, *, at, report):
+        """Called after exact external settlement reconciliation under writer lock."""
+        if self.mode is not Mode.LIVE or type(intent_ids) is not tuple or not 2<=len(intent_ids)<=100 or len(set(intent_ids))!=len(intent_ids):
+            raise StateConflict("Explicit live round trip required.")
+        with self._transaction() as db:
+            records=[]
+            for intent_id in intent_ids:
+                row=db.execute("SELECT * FROM intents WHERE intent_id=?",(identifier(intent_id),)).fetchone()
+                if row is None or OrderState(row["state"]) not in {OrderState.FILLED,OrderState.CANCELED}:
+                    raise StateConflict("Only confirmed terminal round trip can release reservations.")
+                records.append(self._record(row))
+            if len({r.request.intent.account_id for r in records})!=1:
+                raise StateConflict("Round-trip account mismatch.")
+            for record in records:
+                intent=record.request.intent
+                db.execute("UPDATE intents SET reservation_held=0,version=version+1 WHERE intent_id=?",(intent.intent_id,))
+                self._event(db,"live_settlement_reconciled",account_id=intent.account_id,run_id=intent.run_id,
+                    trace_id=intent.trace_id,at=at,intent_id=intent.intent_id,payload=report)
+
+    def release_canceled_exit(self, exit_id, parent_id, *, at):
+        """Release only a confirmed canceled SELL's residual hold.
+
+        The parent entry reservation remains held until ALL child fills settle.
+        Executed child fills stay immutable and count against the next exit.
+        """
+        if self.mode is not Mode.LIVE:raise StateConflict("Live exit ledger required.")
+        with self._transaction() as db:
+            rows=[db.execute("SELECT * FROM intents WHERE intent_id=?",(identifier(key),)).fetchone() for key in (exit_id,parent_id)]
+            if any(row is None for row in rows):raise StateConflict("Missing exit or parent.")
+            exit,parent=(self._record(row) for row in rows)
+            if (exit.state is not OrderState.CANCELED or exit.request.intent.side is not Side.SELL
+                    or parent.request.intent.side is not Side.BUY
+                    or exit.request.intent.account_id!=parent.request.intent.account_id):
+                raise StateConflict("Canceled exit with held matching parent required.")
+            if not exit.reservation_held:return
+            if not parent.reservation_held:raise StateConflict("Parent exposure must remain held.")
+            db.execute("UPDATE intents SET reservation_held=0,version=version+1 WHERE intent_id=?",(exit_id,))
+            i=exit.request.intent
+            self._event(db,"live_canceled_exit_residual_released",account_id=i.account_id,run_id=i.run_id,
+                trace_id=i.trace_id,at=at,intent_id=exit_id,payload={"parent_entry":parent_id,"parent_exposure_still_held":True})

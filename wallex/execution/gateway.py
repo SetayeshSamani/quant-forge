@@ -1,4 +1,4 @@
-"""Offline replay gateway. Stable identities, uncertainty and reconciliation only."""
+"""Durable order state machine; replay by default, explicit scoped LIVE subclass."""
 
 from dataclasses import dataclass
 
@@ -39,8 +39,11 @@ class GatewayResult:
 
 
 class ReplayGateway:
+    transport_type = ReplayTransport
+    supports_live = False
+
     def __init__(self, ledger: Ledger, transport: ReplayTransport, *, clock):
-        if not isinstance(ledger, Ledger) or not isinstance(transport, ReplayTransport) or not callable(clock):
+        if not isinstance(ledger, Ledger) or not isinstance(transport, self.transport_type) or not callable(clock):
             raise TypeError("Install the local Ledger, synthetic ReplayTransport and an explicit clock.")
         self.ledger, self.transport, self.clock = ledger, transport, clock
         self.stop_new_entries = False
@@ -71,12 +74,34 @@ class ReplayGateway:
         # recoverable. Never repeat transport I/O to recover an audit commit.
         return self.ledger.receipt(record.request.intent.intent_id)
 
+    def submit_checked(self, request: ExecutionRequest, evidence) -> GatewayResult:
+        """Additional synthetic risk/market admission; LIVE remains unavailable."""
+        from .admission import assess_replay_admission
+        assessment = assess_replay_admission(request, evidence, now=self._now())
+        if not assessment.local_checks_passed:
+            raise ExecutionRefused("Replay admission: " + ",".join(assessment.reasons))
+        return self.submit(request)
+
+    def _validate_submission(self, request):
+        intent = request.intent
+        if (request.risk_decision.allowed is not True or request.risk_decision.reason != RiskReason.WITHIN_LIMITS):
+            raise ExecutionRefused("The actual provisional risk check did not pass.")
+        if intent.purpose != "entry" or intent.side.value != "BUY":
+            raise ExecutionRefused("Risk-reducing exits and sell execution require a later reviewed stage.")
+
+    def _check_exposure(self, request, records):
+        if any(record.reservation_held or record.state in _UNRESOLVED for record in records):
+            raise ExecutionRefused("The account has held exposure or uncertainty; no new entry is safe.")
+
+    def _before_send(self, request):
+        pass
+
     def submit(self, request: ExecutionRequest) -> GatewayResult:
         if not isinstance(request, ExecutionRequest):
             raise ContractError("Expected the exact typed offline execution request.")
         request = ExecutionRequest.from_dict(request.to_dict())
         intent = request.intent
-        if intent.mode in {Mode.LIVE, Mode.SHADOW}:
+        if intent.mode == Mode.SHADOW or intent.mode == Mode.LIVE and not self.supports_live:
             kind = "live_refused" if intent.mode == Mode.LIVE else "shadow_decision_recorded"
             event = self.ledger.record_event(kind, account_id=intent.account_id, run_id=intent.run_id,
                                              trace_id=intent.trace_id, at=self._now(),
@@ -84,10 +109,7 @@ class ReplayGateway:
             if intent.mode == Mode.LIVE:
                 raise LiveUnavailable("Live trading is unavailable; no order was submitted.")
             return GatewayResult("shadow_recorded", audit_event_id=event)
-        if (request.risk_decision.allowed is not True or request.risk_decision.reason != RiskReason.WITHIN_LIMITS):
-            raise ExecutionRefused("The actual provisional risk check did not pass.")
-        if intent.purpose != "entry" or intent.side.value != "BUY":
-            raise ExecutionRefused("Risk-reducing exits and sell execution require a later reviewed stage.")
+        self._validate_submission(request)
         with self.ledger.writer(intent.account_id):
             existing = self.ledger.existing(request)
             if existing is not None:
@@ -97,10 +119,9 @@ class ReplayGateway:
             records = self.ledger.records(intent.account_id)
             if records and intent.account_id not in self._recovered_accounts:
                 raise RecoveryRequired("Reconcile persisted account intents before new execution after restart.")
-            if self.stop_new_entries:
+            if self.stop_new_entries and intent.purpose == "entry":
                 raise ExecutionRefused("New entries are paused; reconciliation and cancellation remain available.")
-            if any(record.reservation_held or record.state in _UNRESOLVED for record in records):
-                raise ExecutionRefused("The account has held exposure or uncertainty; no new entry is safe.")
+            self._check_exposure(request, records)
             if self._now() < intent.created_at:
                 raise ExecutionRefused("Intent creation is in the future; no submission is permitted.")
             record, created = self.ledger.plan(request, at=self._now())
@@ -111,6 +132,7 @@ class ReplayGateway:
                 self.ledger.reject_unsubmitted(intent.intent_id, expected_version=record.version,
                                                at=self._now(), reason="expired_before_submission")
                 return GatewayResult("expired_without_submission", self.ledger.receipt(intent.intent_id))
+            self._before_send(request)
             record = self.ledger.transition(intent.intent_id, OrderState.SUBMITTING,
                                             expected_version=record.version, at=self._now(),
                                             reason="submission_acceptance_unconfirmed")
@@ -150,7 +172,7 @@ class ReplayGateway:
             unresolved = any(receipt.state in _UNRESOLVED for receipt in receipts)
             self.ledger.record_event("account_recovery_blocked" if unresolved else "account_order_recovery_completed",
                                      account_id=account_id, run_id=run_id, trace_id=trace_id, at=self._now(),
-                                     payload={"scope": "synthetic_order_only", "account_balances_reconciled": False})
+                                     payload={"scope": "request_scoped_order_only" if self.supports_live else "synthetic_order_only", "account_balances_reconciled": False})
             if not unresolved:
                 self._recovered_accounts.add(account_id)
             else:

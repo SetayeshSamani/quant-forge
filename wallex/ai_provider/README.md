@@ -1,14 +1,16 @@
 # BoxAPI advisory provider (contract v1)
 
-An isolated, standard-library-only provider. Importing or constructing it performs
-no requests. No trading modules are imported or changed. There are no orders,
-execution methods, background workers, retries, credential loaders, or automatic
-integration with TP-1, risk, credit, audit, or the dashboard.
+A standard-library-only advisory provider. Importing or constructing it performs
+no requests. There are no order methods, background calls or retries. The explicit
+TP-1 research integration below journals structured evidence without activating
+Risk, Credit or execution.
 
 ## Explicit integration contract
 
 The caller supplies `AdvisoryContext`, a credential, and a trusted `Transport`.
-Only an explicit `client.advise(context)` can invoke `transport.post(request)`.
+Only explicit `client.advise(context)` or the separate technical research
+`client.review_technical(context)` can invoke `transport.post(request)`. The
+original advise() VERIFIED gates remain unchanged.
 The transport receives sensitive headers and must honor timeout/response bounds
 without logging, retaining, or exporting those headers. `UrllibTransport` is an
 optional explicit implementation with TLS verification, a fixed HTTPS endpoint,
@@ -113,18 +115,33 @@ python -B -m unittest discover -s wallex -p "test_*.py" -q
 All package tests use synthetic credentials, injected transports, or mocked HTTP
 openers. They perform no live BoxAPI, market, or account requests.
 
-## Availability and integration dependencies
+## Verified real inference
 
-The owner reported one successful call using `gpt-5.4-mini` at
-`https://ai.boxapi.ir/api/v1/chat/completions`, followed by a request-limit 403
-despite apparent wallet credit. Availability and quota remain **unverified**.
-No live provider request was made for this implementation. The alternative
-`/ai/v1/chat/completions` route is deliberately not used.
+On 2026-10-23 an actual HTTPS observation assessment succeeded at
+`https://ai.boxapi.ir/ai/v1/chat/completions`, model `gpt-5.4-mini`, HTTP200.
+Audit `audit-186` in the local public observer ledger has `inference_succeeded=true`,
+`provider_calls=1` and independently verified payload/source-file hashes. The
+parsed result was NO_TRADE (TREND_UNFAVORABLE, PULLBACK_ABSENT, NO_SIGNAL).
+Response SHA256: `0efaf05b30eeb360d80146cc96e232af8a403306449373c7565fcf064f967cb6`.
+Source commit: `37b1cad28036b5c41d37e0e5c69c93168a8d5b78`.
 
-The request uses `messages`, `max_tokens=512`, and JSON-object `response_format`.
-Provider support for these options and real response envelopes remains unverified
-until separately authorized testing. Unsupported options fail closed through
-normal HTTP handling. Credentials are explicitly injected and never loaded from
-environment variables, files, or DPAPI. Production credential provisioning,
-freshness/attestation mapping, total request deadlines, and downstream integration
-belong to the owner in a separate PR. Live trading safeguards remain unchanged.
+Requests use `model` and `messages`; unsupported optional fields are omitted.
+Routing/accounting metadata is ignored, while structured decisions, refusal/tool
+restrictions and secret filtering remain strict. Endpoint reporting derives from
+the real client. Keys are hidden-prompt/process-memory only. This proves one
+historical research inference, never trading permission or continuing quota.
+Production credential provisioning and hard total network deadlines remain outside
+this verification; auth/quota/transport/parser failures continue to fail closed.
+
+## Integrated TP-1 research path
+
+`python -B -m wallex.ai_provider.tp1_review --state-dir PATH --source-commit FULL_SHA --review-ai`
+reuses validated public sources and the existing offline TP-1 Shadow pipeline.
+One candidate call maximum per invocation; no candidate means no key prompt or
+HTTP. Keys use hidden getpass only. Decimal evidence is exact strings, risk and
+credit remain UNVERIFIED, and all actions remain NO_TRADE. Structured REVIEW
+retention/veto counts, provider status, model, hashes and timestamps are recorded
+in the public audit partition; no prose, headers or private account data are
+published. Decision Center displays evidence on refresh. Synthetic transports
+are explicitly labelled; the genuine successful run is recorded above.
+The old client gate and production execution are not activated by this path.

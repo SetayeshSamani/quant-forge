@@ -36,8 +36,10 @@ export function AppShell({
   setSidebarOpen,
   onNotifications,
   demoView = true,
+  connectionStatus,
 }: {
   demoView?: boolean;
+  connectionStatus?: ReactNode;
   children: ReactNode;
   page: PageId;
   theme: Theme;
@@ -134,7 +136,8 @@ export function AppShell({
             </div>
           </div>
           <div className="header-controls">
-            <span className="read-only">
+            {connectionStatus}
+            {demoView && <><span className="read-only">
               <Icon name="book" />
               فقط خواندنی
             </span>
@@ -142,7 +145,7 @@ export function AppShell({
               <Icon name="pause" size={17} />
               {demoPage ? "متوقف" : "اجرای معامله غیرفعال"}
             </Badge>
-            <Badge tone="info">{demoPage ? "DEMO" : "READ ONLY"}</Badge>
+            <Badge tone="info">{demoPage ? "DEMO" : "READ ONLY"}</Badge></>}
             <div
               className="theme-switch"
               role="group"
