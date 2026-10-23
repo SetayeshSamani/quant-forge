@@ -1,14 +1,16 @@
 # BoxAPI advisory provider (contract v1)
 
-An isolated, standard-library-only provider. Importing or constructing it performs
-no requests. No trading modules are imported or changed. There are no orders,
-execution methods, background workers, retries, credential loaders, or automatic
-integration with TP-1, risk, credit, audit, or the dashboard.
+A standard-library-only advisory provider. Importing or constructing it performs
+no requests. There are no order methods, background calls or retries. The explicit
+TP-1 research integration below journals structured evidence without activating
+Risk, Credit or execution.
 
 ## Explicit integration contract
 
 The caller supplies `AdvisoryContext`, a credential, and a trusted `Transport`.
-Only an explicit `client.advise(context)` can invoke `transport.post(request)`.
+Only explicit `client.advise(context)` or the separate technical research
+`client.review_technical(context)` can invoke `transport.post(request)`. The
+original advise() VERIFIED gates remain unchanged.
 The transport receives sensitive headers and must honor timeout/response bounds
 without logging, retaining, or exporting those headers. `UrllibTransport` is an
 optional explicit implementation with TLS verification, a fixed HTTPS endpoint,
@@ -126,5 +128,17 @@ Provider support for these options and real response envelopes remains unverifie
 until separately authorized testing. Unsupported options fail closed through
 normal HTTP handling. Credentials are explicitly injected and never loaded from
 environment variables, files, or DPAPI. Production credential provisioning,
-freshness/attestation mapping, total request deadlines, and downstream integration
-belong to the owner in a separate PR. Live trading safeguards remain unchanged.
+freshness/attestation mapping, total request deadlines, remain production integration limitations. Live trading safeguards remain unchanged.
+
+## Integrated TP-1 research path
+
+`python -B -m wallex.ai_provider.tp1_review --state-dir PATH --source-commit FULL_SHA --review-ai`
+reuses validated public sources and the existing offline TP-1 Shadow pipeline.
+One candidate call maximum per invocation; no candidate means no key prompt or
+HTTP. Keys use hidden getpass only. Decimal evidence is exact strings, risk and
+credit remain UNVERIFIED, and all actions remain NO_TRADE. Structured REVIEW
+retention/veto counts, provider status, model, hashes and timestamps are recorded
+in the public audit partition; no prose, headers or private account data are
+published. Decision Center displays evidence on refresh. Synthetic transports
+are explicitly labelled; actual inference is unavailable until owner verification.
+The old client gate and production execution are not activated by this path.

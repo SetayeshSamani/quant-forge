@@ -25,6 +25,10 @@ Saved public data → validation/independent consecutive segments → TP-1 techn
 assessment → risk/credit diagnostics → Shadow journal → **NO_TRADE**.
 The default frontend polls the real read-only Python observer API every 15
 seconds. It displays actual public-market/TP-1 reports, health and blockers.
+Optional owner-run AI review evaluates actual TP-1 candidates as research-only
+REVIEW/veto, with model/hash/timestamp evidence in Decision Center. Missing real
+provider evidence is UNAVAILABLE; mock results are labelled synthetic. Checked
+replay admission reuses risk controls; stop monitoring never submits exits.
 Private balances, credit, orders and profit stay unavailable. The legacy synthetic
 presentation/manual importer exists only at the explicit `?view=demo` URL.
 No credentials or private Wallex requests run in the browser. See the
@@ -155,5 +159,6 @@ The existing fee-aware engine and TP-1 Shadow are composed by
 `python -B -m wallex.shadow.release_evidence --help`; real market files stay
 outside Git and retain hashes/cutoffs. Simulation costs/capital are explicit
 assumptions. TP-1 remains NO_TRADE; no live performance or actual AI contribution
-is claimed. Docker Hub layer HTTP403 currently blocks local image verification;
+is claimed. Docker build, public collection, API/UI refresh and persistent stop/restart are
+verified locally;
 native port8080 UI/API/collection and controlled stop/persistence were checked.
