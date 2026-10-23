@@ -14,8 +14,11 @@ npm run build
 
 Open the URL printed by Vite (default http://127.0.0.1:5173).
 Theme persists locally when storage is available. Unbuilt sections are disabled.
-All numbers, candles, EMA illustrations and journal rows are synthetic DEMO
-presentation fixtures, not backend assessments, market evidence or orders.
+Overview, Credit & Risk, and the six-stage decision scenario use synthetic DEMO
+presentation fixtures, not account evidence or orders. Decision Center also shows
+a separate HISTORICAL / OFFLINE BTCTMN summary reported by the project owner:
+264 H1, 24 M15, 4 evaluated steps, 0 eligible, 0 errors, NO_TRADE. The original
+artifact, hashes, range and cutoff are not bundled; no live readiness is claimed.
 No API client, credentials, trading authorization or executable action exists.
 Python modules are unchanged; no backend endpoint is assumed.
 
@@ -30,5 +33,9 @@ npm test
 ```
 
 `npm run check` validates strict TypeScript; build also runs this check.
+Static deployment: Node >=22.12, root `frontend`, install `npm ci`, build
+`npm run build`, publish `dist`. No server or environment variables are required.
+Hash navigation preserves direct links such as `/#decision-center`.
+
 Future: other approved screens and an agreed read-only backend contract.
 Green demo indicators never grant permission to trade.
