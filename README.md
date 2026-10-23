@@ -42,6 +42,15 @@ needed. Build runs strict TypeScript checking. Optional existing browser smoke
 checks: `npm test` with Playwright Chromium installed, or set
 `$env:PW_BROWSER_CHANNEL = "msedge"` to use installed Edge.
 
+## Supervised public-market worker
+
+A real-public-market worker now reuses the existing TP-1/Shadow diagnostics with
+persistent Audit events, run-once/continuous modes and controlled shutdown.
+It remains NO_TRADE; authenticated preflight is a separate owner-run hidden prompt.
+See [startup, preflight, status and durable-worker requirements](docs/AGENT_RUNTIME.md).
+Live trading is blocked by unapproved risk/admission, replay-only storage/execution,
+missing real exit/reconciliation contracts and unverified account/fee/market evidence.
+
 ## Offline Python evidence
 
 Use Python 3.11+ and the standard library, from the repository root:
@@ -99,7 +108,8 @@ performed by this repository change.
 
 ## Limitations
 
-No live orders, authenticated requests, account writes or automatic execution.
+No live orders, account writes or automatic execution. The UI/public worker uses
+no credentials; a separate explicit interactive GET-only preflight is available.
 Credit-plan authentication (prop HTTP 401) remains unresolved. Account balances,
 credit evidence, fees, quote freshness and execution permissions are unverified.
 Public depth receipt time is not provider event time or verified freshness.
