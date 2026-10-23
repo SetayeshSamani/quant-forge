@@ -579,3 +579,45 @@ Partial coverage is `PARTIAL`; even complete coverage is only
 `NO_TRADE` and `executable_ready=False`. This is not a LoadedDataset, shared schema
 or TP-1 adapter. Strict `history.decode_minutes()`, native H1 ingestion, existing
 research/replay, Strategy, Risk, Shadow and Execution behavior are unchanged.
+
+
+## Public order-book and spread diagnostics
+
+```powershell
+python -B -m wallex.market.public_orderbook --analyze --input SAVED_DEPTH_JSON --symbol BTCTMN --received-at RECORDED_UTC_SECONDS
+# Optional manual public GET; not executed during development:
+python -B -m wallex.market.public_orderbook --fetch --symbol BTCTMN --timeout-seconds 5 --max-levels 100
+```
+
+Reference: [official Wallex depth documentation](https://api-docs.wallex.ir/).
+Its indexed example documents public `GET /v1/depth?symbol=...`, `success=true`,
+`result.bid`/`result.ask` lists, and `price`, `quantity`, `sum` per level (including
+JSON numeric quantities). Direct documentation access timed out during this audit;
+the indexed official reference was used. No real market request was performed.
+
+Default/import behavior never fetches. Offline mode requires the originally
+recorded local receipt time in integer UTC Unix seconds; no file-mtime/current-time
+substitution. Fetch records local request-start and receipt times only. The documented
+book does not establish a provider event timestamp or independent symbol identity:
+both modes keep identity/units UNVERIFIED and source event time/verified freshness
+UNAVAILABLE, even if an undocumented timestamp field appears.
+
+The fixed HTTPS-origin transport has TLS verification, no credentials, proxies,
+redirects or retries, a 1-10 second socket timeout and a 256 KiB response cap.
+`--max-levels` defaults to 100 per side, capped at 1000. Over-limit books reject
+without truncation. Both nonempty sides require finite positive price/quantity/sum,
+strict descending bids/ascending asks and best bid strictly below best ask; locked
+books also reject conservatively. Invalid levels anywhere reject the whole result.
+Provider `sum` is validated, not assumed exactly equal to price*quantity under an
+undocumented rounding policy. No unit conversion or liquidity guarantee is made.
+
+All numbers parse as Decimal; midpoint is exact for bounded inputs and percentage
+spread is `100 * (ask-bid) / midpoint`, rounded once to 34 digits, half-even,
+independent of caller Decimal settings. JSON exports decimals as strings. Successful
+and malformed bounded responses retain raw SHA-256; oversized reads have no full
+hash (`bytes_read` counts only bytes actually read, including the overflow sentinel).
+HTTP failures expose only status/reason codes, never provider error bodies.
+Output is research-only JSON with stable reasons and permanent NO_TRADE,
+`executable_ready=false`. Invalid results have null price/spread metrics and exit 1.
+No MarketFrameV1, approved quote, risk permission or account evidence is produced;
+the separate prop authentication blocker is unchanged. Tests use synthetic data only.
