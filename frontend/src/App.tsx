@@ -10,7 +10,7 @@ import { Overview } from "./pages/Overview";
 import { DecisionCenter } from "./pages/DecisionCenter";
 import { CreditRisk } from "./pages/CreditRisk";
 import { Operations } from "./pages/Operations";
-import { BackendStatus, BackendView } from "./pages/BackendView";
+import { ConnectionIndicator, BackendView } from "./pages/BackendView";
 import { useObserver } from "./data/useObserver";
 import type { EvidenceState, ImportedEvidence } from "./data/runtimeEvidence";
 
@@ -76,6 +76,7 @@ export function App() {
       <AppShell
         page={page}
         demoView={demoView}
+        connectionStatus={!demoView ? <ConnectionIndicator connection={observer}/> : undefined}
         theme={theme}
         setTheme={setTheme}
         sidebarOpen={sidebarOpen}
@@ -83,10 +84,8 @@ export function App() {
         onNotifications={() => showNotice("notifications")}
       >
         {demoView && <a className="subtle-button" href="/#overview">بازگشت به داشبورد متصل به API</a>}
-        {!demoView && <BackendStatus connection={observer} />}
         {!demoView ? (
-          page === "overview" || page === "credit-risk" || page === "decision-center" ? <BackendView page={page} connection={observer}/> :
-          <Operations page={page} evidence={{public:observer.market,account:null}} remote={observer} onImport={()=>{}} onClear={()=>{}}/>
+          <BackendView page={page} connection={observer}/>
         ) : page === "credit-risk" ? (
           <CreditRisk />
         ) : page === "decision-center" ? (
