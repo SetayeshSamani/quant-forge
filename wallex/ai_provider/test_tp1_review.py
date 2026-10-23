@@ -32,6 +32,9 @@ class TP1ReviewTests(unittest.TestCase):
                 again=run_offline(m1,h1,**options,adviser=adviser)
                 self.assertEqual(result,again)
                 self.assertEqual(adviser.calls,1)
+                self.assertEqual(result['summary']['ai_reviewed_candidates'],1)
+                self.assertEqual(result['summary']['ai_retained_candidates'],int(decision=='REVIEW'))
+                self.assertEqual(result['summary']['ai_vetoed_candidates'],int(decision=='NO_TRADE'))
                 record=adviser.records[0]
                 self.assertEqual(record['retained_for_research'],decision=='REVIEW')
                 self.assertEqual(record['inference_source'],'SYNTHETIC_TEST_TRANSPORT')

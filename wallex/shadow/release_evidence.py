@@ -120,7 +120,7 @@ def build_evidence(observation_dir, output, *, symbol, base, quote, as_of, sourc
         'symbol':symbol,'base_asset':base,'quote_asset':quote,'as_of':as_of,
         'simulation_assumptions':simulation,'volume_assumption':'CALLER_ATTESTED_BASE_NOT_VERIFIED',
         'technical_summary':offline['summary'],'runs':runs,
-        'ai':{'actual_candidate_contribution':'NONE','provider_calls':0,'reason':'NOT_CONNECTED_AND_RISK_CREDIT_UNVERIFIED'},
+        'ai':{'actual_candidate_contribution':'NONE','provider_calls':0,'reason':'AI_REVIEW_NOT_REQUESTED_IN_THIS_OFFLINE_RUN'},
         'limitations':['NO_EXECUTABLE_TP1_ENTRY_OR_EXIT_POLICY','ZERO_FILLS_NOT_PROFITABILITY_EVIDENCE',
                       'SIMULATED_CAPITAL_NOT_ACCOUNT_EQUITY','FEES_SLIPPAGE_NOT_VERIFIED_ACCOUNT_COSTS'],
         'action':'NO_TRADE','executable_ready':False,

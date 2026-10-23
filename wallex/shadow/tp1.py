@@ -101,6 +101,7 @@ def tp1_decision(frame, *, pe: Decimal | None = None,
         "reasons": reasons,
         "frame_valid": assessment.frame_valid,
         "technical_eligible": assessment.technical_eligible,
+        **({"research_candidate_retained": assessment.technical_eligible and risk_details["ai"].get("retained_for_research") is True} if adviser is not None else {}),
         "risk_approval": "UNAVAILABLE",
         "executable_ready": False,
     }), diagnostics_json=canonical_json(risk_details))

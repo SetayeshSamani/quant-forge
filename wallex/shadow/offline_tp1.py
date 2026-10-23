@@ -146,6 +146,12 @@ def run_offline(m1_input, h1_input, *, symbol, base_asset, quote_asset,
             row["blocking_reason_counts"] = dict(sorted(local_blockers.items()))
             blockers.update(local_blockers)
             segments.append(row)
+    if adviser is not None:
+        reviewed = [step["ai"] for step in steps if step.get("technical_eligible") and "ai" in step]
+        counts["ai_reviewed_candidates"] = sum(row.get("status") == "OK" for row in reviewed)
+        counts["ai_retained_candidates"] = sum(row.get("status") == "OK" and row.get("retained_for_research") is True for row in reviewed)
+        counts["ai_vetoed_candidates"] = sum(row.get("status") == "OK" and row.get("advisory_decision") == "NO_TRADE" for row in reviewed)
+        counts["ai_unavailable_candidates"] = sum(row.get("status") != "OK" for row in reviewed)
     return {
         "mode": "OFFLINE_TP1_INTEGRATION", "evidence_kind": evidence_kind.value,
         "instrument": gap["instrument"], "as_of": as_of, "timestamp_semantics": "UTC_OPEN_SECONDS",

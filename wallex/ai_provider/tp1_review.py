@@ -16,8 +16,8 @@ from .client import BoxAPIClient, UrllibTransport
 
 _FIELDS = {"mode", "symbol", "as_of", "evidence_hash", "strategy_version", "evidence_kind",
            "source_commit", "last_close", "ema20_h1", "ema50_h1", "ema20_h1_minus3",
-           "ema20_m15", "atr14_m15", "distance_m15", "risk", "credit"}
-_NUMBERS = {"last_close", "ema20_h1", "ema50_h1", "ema20_h1_minus3", "ema20_m15", "atr14_m15", "distance_m15"}
+           "ema20_m15", "atr14_m15", "distance_m15", "previous_close_m15", "previous_ema20_m15", "risk", "credit"}
+_NUMBERS = {"last_close", "ema20_h1", "ema50_h1", "ema20_h1_minus3", "ema20_m15", "atr14_m15", "distance_m15", "previous_close_m15", "previous_ema20_m15"}
 
 
 def valid_context(value):
@@ -74,6 +74,8 @@ class CandidateAdviser:
             "credit": "UNVERIFIED", "last_close": str(assessment.pullback.current_close),
             "ema20_h1": str(assessment.trend.ema20), "ema50_h1": str(assessment.trend.ema50),
             "ema20_h1_minus3": str(assessment.trend.ema20_three_bars_ago),
+            "previous_close_m15": str(assessment.pullback.previous_close),
+            "previous_ema20_m15": str(assessment.pullback.previous_ema20),
             "ema20_m15": str(assessment.pullback.current_ema20), "atr14_m15": str(assessment.pullback.current_atr14),
             "distance_m15": str(assessment.pullback.distance_from_ema20)}
         if not valid_context(context):
@@ -137,6 +139,8 @@ def main(argv=None):
             as_of=observed["decision_cutoff"], evidence_kind=EvidenceKind(raw["pipeline"]["evidence_kind"]), volume_unit="base")
         baseline = run_offline(selected/"m1.json", selected/"h1.json", **settings)
         records, calls = [], 0
+        if re.fullmatch(r"[0-9a-f]{40}", args.source_commit or "") is None:
+            raise ValueError("SOURCE_COMMIT_REQUIRED")
         if baseline["summary"]["technical_eligible_steps"]:
             with warnings.catch_warnings():
                 warnings.simplefilter("error", getpass.GetPassWarning)
@@ -151,7 +155,7 @@ def main(argv=None):
             records, calls = adviser.records, adviser.calls
         report = {"status": "REVIEW_RECORDED" if records else "NO_TECHNICAL_CANDIDATE", "symbol": observed["symbol"],
             "decision_cutoff": settings["as_of"], "source_hashes": {k: observed["source_hashes"][k] for k in ("m1", "h1")},
-            "provider_calls": calls, "records": records, "action": "NO_TRADE", "executable_ready": False}
+            "provider_calls": calls, "records": records, "technical_summary": baseline["summary"], "action": "NO_TRADE", "executable_ready": False}
         stamp = int(time.time())
         Ledger(state/"audit.sqlite").record_event("public_tp1_ai_review", account_id=PARTITION,
             run_id="ai-research-"+str(stamp), trace_id="public-only", at=datetime.fromtimestamp(stamp, timezone.utc), payload=report)
