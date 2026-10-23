@@ -2,14 +2,16 @@
 
 QuantForge demonstrates a cost-aware TP-1 Trend Pullback workflow with explicit
 market-data uncertainty and fail-closed risk/credit diagnostics. This submission
-is an **offline research and read-only UI demo**, not a live trading system.
+includes **offline research, a real-public-market observer and read-only UI**,
+with real execution disabled.
 Every executable action remains **NO_TRADE**, `executable_ready=false`.
 
 ## Architecture and features
 
 - `frontend/`: React + TypeScript + Vite, Persian RTL, reusable components,
   bundled Vazirmatn, persistent dark/light themes and responsive navigation.
-  Screens: Overview, Agent Decision Center, Credit & Risk.
+  Nine routes: Overview, Decision Center, Credit & Risk, Strategy & Market,
+  Positions & Orders, Backtest & Analytics, Robot Control, Alerts & Events, Settings.
 - `wallex/market/`: strict OHLCV validation, native H1 ingestion, gap-aware M15
   segmentation and research-only public order-book/spread diagnostics.
 - `wallex/strategy/`: deterministic Decimal EMA/ATR, H1 trend, M15 pullback,
@@ -22,7 +24,9 @@ Every executable action remains **NO_TRADE**, `executable_ready=false`.
 Saved public data → validation/independent consecutive segments → TP-1 technical
 assessment → risk/credit diagnostics → Shadow journal → **NO_TRADE**.
 The static frontend displays labelled presentation data and a separate reported
-historical summary; it does not call Python, Wallex or an AI provider.
+historical summary, plus manually imported sanitized worker/preflight reports.
+It does not call Python, Wallex or an AI provider. Operational pages never invent
+account balances, orders or profit; absent evidence stays unavailable.
 
 ## Run the UI
 
@@ -46,7 +50,17 @@ checks: `npm test` with Playwright Chromium installed, or set
 
 A real-public-market worker now reuses the existing TP-1/Shadow diagnostics with
 persistent Audit events, run-once/continuous modes and controlled shutdown.
-It remains NO_TRADE; authenticated preflight is a separate owner-run hidden prompt.
+It remains NO_TRADE; independent authenticated account READ preflight is a
+separate owner-run hidden prompt, without package/user IDs or the active-plan route:
+
+```powershell
+python -B -m wallex.infra.spot_preflight --connect --symbol BTCTMN --base BTC --quote TMN
+```
+
+Select the intended discovered prop account with `HACKATHON N`; verify the masked
+identity locally. Both dedicated credit key and account header are used for scoped
+balance/order reads. No main-account fallback, write operation or order test exists.
+Read success never grants trade permission or risk approval.
 See [startup, preflight, status and durable-worker requirements](docs/AGENT_RUNTIME.md).
 Live trading is blocked by unapproved risk/admission, replay-only storage/execution,
 missing real exit/reconciliation contracts and unverified account/fee/market evidence.
@@ -70,7 +84,8 @@ The owner-confirmed **BTCTMN HISTORICAL / OFFLINE** result is 264 H1, 24 M15,
 4 evaluated steps, 0 eligible steps, 0 errors, **NO_TRADE**. Decision Center shows
 only this supplied summary. Original response files, hashes, UTC range/cutoff and
 per-step rejection reasons are not bundled; no independent rerun is claimed here.
-All other UI portfolio, price, credit and decision fixtures remain **DEMO**.
+The original three screens retain **DEMO** fixtures. The six operational pages
+use explicitly selected captured reports or unavailable states, separately from DEMO.
 
 ## Deploy the static submission
 
@@ -103,15 +118,20 @@ performed by this repository change.
    inspect Market → Strategy → Risk → Credit → Audit → Execution and its blockers.
 4. **Credit & Risk:** distinguish sample values from unverified account evidence;
    explain that wallet balance is not inferred risk equity.
-5. Optionally show the existing Python offline report or labelled synthetic CLI
-   walkthrough. End with NO_TRADE and the deployment URL, once available.
+5. In **Connections & Settings**, load the public worker's saved `report.json`.
+   Show its actual technical reasons/counts in Strategy & Market and Analytics;
+   explain captured timestamps, missing account inputs and disabled host controls.
+6. Optionally load sanitized owner-run spot preflight JSON. Positions & Orders
+   shows only redacted evidence flags/counts; zero observed orders is not atomic
+   flatness or admission. End with NO_TRADE and the deployment URL.
 
 ## Limitations
 
 No live orders, account writes or automatic execution. The UI/public worker uses
 no credentials; a separate explicit interactive GET-only preflight is available.
-Credit-plan authentication (prop HTTP 401) remains unresolved. Account balances,
-credit evidence, fees, quote freshness and execution permissions are unverified.
+Credit-plan authentication (prop HTTP 401) remains unresolved, separately from
+the independent scoped read preflight. Its actual result is owner-run; missing
+credit evidence, fees, quote freshness and execution permissions remain unverified.
 Public depth receipt time is not provider event time or verified freshness.
 MarketFrame schemas remain provisional; technical eligibility never authorizes
 trading. No backtested profitability, completed trades or verified capacity is
