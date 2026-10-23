@@ -63,7 +63,10 @@ A multi-stage root Dockerfile builds Vite with Node 24 and serves the resulting
 static UI plus API with Python 3.11 on 0.0.0.0:8080. `.dockerignore` permits only
 required frontend/source files; no Git, local state, credentials or downloaded
 market datasets are copied. No Python dependencies or browser secrets are needed.
-Docker daemon was unavailable locally, so image build/runtime remains unverified.
+Docker daemon was subsequently started for final QA. The official Python image
+layer download returned HTTP403, so image build/runtime remains unverified. Native
+port8080 UI/API/public collection and controlled stop/persistence were checked;
+see RELEASE_REPRODUCIBILITY.md for exact commands and limits.
 
 Use Liara's Docker platform, repository root build context, Dockerfile at root,
 port 8080, TLS reverse proxy, one instance, and a persistent disk mounted at
