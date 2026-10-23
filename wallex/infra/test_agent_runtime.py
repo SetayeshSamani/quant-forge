@@ -73,7 +73,8 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(report["account_evidence"], "UNVERIFIED_NOT_FETCHED")
             self.assertEqual(report["action"], "NO_TRADE")
             self.assertFalse(report["executable_ready"])
-            self.assertIn("REPLAY_GATEWAY_LIVE_UNAVAILABLE", report["readiness_blockers"])
+            self.assertIn("LIVE_GATEWAY_NOT_ACTIVATED", report["readiness_blockers"])
+            self.assertIn("RISK_PIPELINE_DIAGNOSTIC_ONLY", report["readiness_blockers"])
             saved = next((cfg.state_dir / "observations").iterdir())
             for name in ("m1", "h1"):
                 self.assertEqual(report["requests"][name]["raw_sha256"], sha256((saved / (name + ".json")).read_bytes()).hexdigest())

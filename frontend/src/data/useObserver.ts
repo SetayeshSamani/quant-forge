@@ -7,7 +7,7 @@ export interface ObserverConnection {
   loading: boolean; error: string | null; status: string; checkedAt: number | null;
   generatedAt: number | null; age: number | null; runtimeState: string;
   heartbeatAge: number | null; blockers: string[]; refresh: () => void;
-  market: RuntimeEvidence | null; aiReviews:AiReview[];
+  market: RuntimeEvidence | null; aiReviews:AiReview[]; localChecks:Record<string,string>;
   steps: { cutoff: number | null; eligible: boolean; reasons: string[] }[];
 }
 const record = (v: unknown): Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -16,7 +16,7 @@ const codes = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is st
 export function useObserver(enabled: boolean): ObserverConnection {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<Omit<ObserverConnection,"refresh">>({ loading:true,error:null,status:"LOADING",checkedAt:null,
-    generatedAt:null,age:null,runtimeState:"UNAVAILABLE",heartbeatAge:null,blockers:[],market:null,steps:[],aiReviews:[] });
+    generatedAt:null,age:null,runtimeState:"UNAVAILABLE",heartbeatAge:null,blockers:[],market:null,steps:[],aiReviews:[],localChecks:{} });
   useEffect(() => {
     if (!enabled) return;
     let active=true, timer: ReturnType<typeof setTimeout>, controller: AbortController;
@@ -44,10 +44,16 @@ export function useObserver(enabled: boolean): ObserverConnection {
             evidenceHash:row.evidence_hash,sourceCommit:row.source_commit,asOf:number(row.as_of)!,completedAt:number(row.completed_at)!,
             source:row.inference_source==="BOXAPI_HTTPS" ? "BOXAPI_HTTPS" : "SYNTHETIC_TEST_TRANSPORT",evidenceKind:row.evidence_kind==="historical_data" ? "HISTORICAL / OFFLINE" : "SYNTHETIC",reasons:codes(row.reason_codes)}];
         });
+        const checks=record(data.local_readonly_checks);
+        const localChecks:Record<string,string>={};
+        for(const key of ["mode","account","scope","balances","orders","fees","market_rules","risk","execution"]){
+          const value=checks[key];
+          if(typeof value==="string" && /^[A-Z][A-Z0-9_]{0,90}$/.test(value))localChecks[key]=value;
+        }
         if(active) setState({loading:false,error:response.ok ? null : "OBSERVER_UNAVAILABLE",status:data.data_status==="RECENT_CAPTURED" ? "RECENT_CAPTURED" : data.data_status==="STALE" ? "STALE" : "UNAVAILABLE",
           checkedAt:Math.floor(Date.now()/1000),generatedAt:number(data.generated_at),age:number(data.observation_age_seconds),
           runtimeState:typeof runtime.state==="string" && /^(STARTING|RUNNING|DEGRADED|STOPPED|FAILED)$/.test(runtime.state) ? runtime.state : "UNAVAILABLE",
-          aiReviews,heartbeatAge:number(runtime.heartbeat_age_seconds),blockers:codes(data.blockers),market:parsed as RuntimeEvidence | null,
+          localChecks,aiReviews,heartbeatAge:number(runtime.heartbeat_age_seconds),blockers:codes(data.blockers),market:parsed as RuntimeEvidence | null,
           steps:sourceSteps.map(value => {const step=record(value), tech=record(step.technical_evidence); return {cutoff:number(step.as_of),eligible:step.technical_eligible===true,
             reasons:[...codes(record(tech.trend).reasons),...codes(record(tech.pullback).reasons),...codes(step.blockers)]};})});
       } catch {

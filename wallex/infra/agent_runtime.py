@@ -30,8 +30,8 @@ MODE = "PUBLIC_OBSERVATION_ONLY"
 PARTITION = "PUBLIC_OBSERVER_NOT_AN_EXCHANGE_ACCOUNT"
 BLOCKERS = (
     "REAL_MONEY_ACTIVATION_NOT_APPROVED", "RISK_PIPELINE_DIAGNOSTIC_ONLY",
-    "REPLAY_GATEWAY_LIVE_UNAVAILABLE", "LEDGER_LIVE_INTENTS_UNSUPPORTED",
-    "REAL_EXIT_MANAGEMENT_UNIMPLEMENTED", "VENUE_FILL_ID_AND_RECOVERY_UNRESOLVED",
+    "LIVE_GATEWAY_NOT_ACTIVATED", "LIVE_ACCOUNT_LEDGER_NOT_ACTIVATED",
+    "LIVE_PROTECTIVE_EXIT_POLICY_NOT_ACTIVATED", "VENUE_FILL_SNAPSHOT_COMPLETENESS_UNVERIFIED",
     "PRIVATE_BALANCES_POSITIONS_OPEN_ORDERS_UNVERIFIED", "CREDIT_PLAN_UNVERIFIED",
     "ACTUAL_FEES_MARKET_RULES_AND_PERMISSION_UNVERIFIED", "PE_UNAVAILABLE",
     "MARKET_IDENTITY_AND_EVENT_FRESHNESS_UNVERIFIED",
@@ -69,7 +69,7 @@ class ObserverConfig:
         if self.volume_unit not in (None, "base") or type(self.interval_seconds) is not int or not 60 <= self.interval_seconds <= 900:
             raise ValueError("INVALID_OBSERVER_CONFIG")
         path = Path(self.state_dir).resolve()
-        if path.is_relative_to(Path(__file__).resolve().parents[2]):
+        if path.is_relative_to(Path(__file__).resolve().parents[2]) and not any(path.is_relative_to(Path(__file__).resolve().parents[2]/p) for p in ("data", ".local")):
             raise ValueError("STATE_MUST_BE_OUTSIDE_REPOSITORY")
         return path
 

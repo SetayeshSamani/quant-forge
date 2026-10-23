@@ -130,6 +130,21 @@ def _ai_projection(raw, symbol, now):
             "decision_cutoff": _stamp(raw.get("decision_cutoff")), "status": "RECORDED_RESEARCH_ONLY" if records else "UNAVAILABLE"}
 
 
+def _demo_projection(value):
+    value=_object(value)
+    allowed={
+        "mode":{"SHADOW","REPLAY","LIVE"},
+        "account":{"PENDING","AUTHENTICATED_READS_VERIFIED","BLOCKED","UNAVAILABLE"},
+        "scope":{"DISCOVERY_MATCHED_HEADER_SCOPED_NOT_ECHOED","UNVERIFIED"},
+        "balances":{"AVAILABLE_SERVER_SIDE_NOT_EQUITY","UNAVAILABLE"},
+        "orders":{"READ_VERIFIED_COVERAGE_UNVERIFIED","UNAVAILABLE"},
+        "fees":{"UNVERIFIED"},"market_rules":{"FULL_LIMITS_UNVERIFIED"},
+        "risk":{"DIAGNOSTIC_ONLY"},"execution":{"HTTPS_IMPLEMENTED_LIVE_LOCKED"}}
+    return {**{key:value[key] if type(value.get(key)) is str and value[key] in choices else "UNAVAILABLE" for key,choices in allowed.items()},
+            "observed_at":_stamp(value.get("observed_at")),"blockers":_codes(value.get("blockers")),
+            "action":"NO_TRADE","executable_ready":False}
+
+
 def snapshot(state_dir, *, now=None):
     """Read selected public-partition events, never initialize/mutate Ledger.
 
@@ -140,7 +155,7 @@ def snapshot(state_dir, *, now=None):
     result = {"mode": MODE, "status": "PERSISTED_STATUS_NOT_LIVENESS_PROOF", "api_schema": 1,
               "action": "NO_TRADE", "executable_ready": False, "generated_at": now, "source_commit": _revision(),
               "data_status": "UNAVAILABLE", "observation_age_seconds": None,
-              "last_observation": None, "ai_review": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
+              "last_observation": None, "ai_review": None, "local_readonly_checks": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
                   "heartbeat_age_seconds": None, "process_liveness": "UNVERIFIED"},
               "blockers": list(BLOCKERS), "private_account_api": "NOT_EXPOSED_REQUIRES_AUTHENTICATED_BACKEND"}
     try:
@@ -168,10 +183,13 @@ def snapshot(state_dir, *, now=None):
                 if len(row[0]) > MAX_JSON:
                     raise ValueError("OBSERVER_RECORD_TOO_LARGE")
                 return _decode(row[0]), int(datetime.fromisoformat(row[1]).timestamp()), row[2]
+            local_checks=latest(("demo_readonly_status",))
             ai = latest(("public_tp1_ai_review",))
             observation = latest(("observer_cycle_completed",))
             heartbeat = latest(("observer_heartbeat",))
             lifecycle = latest(("observer_started", "observer_stopped", "observer_failed"))
+        if local_checks:
+            result["local_readonly_checks"]=_demo_projection(local_checks[0])
         if ai:
             result["ai_review"] = _ai_projection(ai[0], config.symbol, now)
         if observation:
@@ -235,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             data = snapshot(self.server.state_dir)
             return self._send(200 if data["last_observation"] is not None else 503, canonical_json(data).encode())
         if target.path == "/api/health":
-            return self._send(200, canonical_json({"status":"API_UP","source_commit":_revision(),"action":"NO_TRADE","executable_ready":False}).encode())
+            return self._send(200, canonical_json({"status":"API_UP","source_commit":_revision(),"demo_instance":os.environ.get("QF_DEMO_INSTANCE"),"action":"NO_TRADE","executable_ready":False}).encode())
         root = self.server.frontend_dir
         path = root / unquote(target.path).lstrip('/') if root else None
         if root and target.path == "/":
@@ -252,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
     do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _deny
 
 
-def main(argv=None):
+def main(argv=None, *, shutdown_event=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", required=True, type=Path)
     parser.add_argument("--host", default="127.0.0.1")
@@ -274,6 +292,13 @@ def main(argv=None):
                 print('{"worker":"STOPPED_FAIL_CLOSED","action":"NO_TRADE"}',flush=True)
         worker=threading.Thread(target=observe,daemon=True)
         worker.start()
+    if shutdown_event is not None:
+        def shutdown_when_requested():
+            while not stop.is_set():
+                if shutdown_event.wait(0.25):
+                    server.shutdown()
+                    return
+        threading.Thread(target=shutdown_when_requested,daemon=True).start()
     def interrupt(*_):
         raise KeyboardInterrupt
     for sig in (signal.SIGINT,signal.SIGTERM):
