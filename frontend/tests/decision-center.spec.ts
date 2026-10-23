@@ -13,7 +13,7 @@ test("decision flow and journal remain read-only synthetic NO_TRADE", async ({
     )
       unexpectedRequests.push(request.method() + " " + request.url());
   });
-  await page.goto("/");
+  await page.goto("/?view=demo");
   await page.getByRole("link", { name: "مرکز تصمیم", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "مرکز تصمیم", exact: true }),
@@ -88,7 +88,7 @@ test("decision flow and journal remain read-only synthetic NO_TRADE", async ({
 test("decision deep link, themes and responsive navigation reuse the shell", async ({
   page,
 }) => {
-  await page.goto("/#decision-center");
+  await page.goto("/?view=demo#decision-center");
   await expect(page).toHaveTitle("مرکز تصمیم | QuantForge DEMO");
   const dark = await page
     .locator("body")
@@ -136,7 +136,7 @@ test("decision deep link, themes and responsive navigation reuse the shell", asy
 
 
 test("historical owner-reported summary stays separate from DEMO and authorization", async ({ page }) => {
-  await page.goto("/#decision-center");
+  await page.goto("/?view=demo#decision-center");
   const historical = page.getByRole("region", { name: "ارزیابی تاریخی TP-1 · BTCTMN", exact: true });
   await expect(historical).toContainText("HISTORICAL / OFFLINE");
   await historical.locator("summary").click();

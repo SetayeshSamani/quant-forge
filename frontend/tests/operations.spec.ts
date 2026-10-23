@@ -10,7 +10,7 @@ test("all nine routes keep RTL themes navigation and meaningful unavailable cont
   const errors: string[] = [], requests: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("request", request => { if (request.method() !== "GET" || !request.url().startsWith("http://127.0.0.1:5173/")) requests.push(request.url()); });
-  await page.goto("/");
+  await page.goto("/?view=demo");
   await expect(page.getByText("به‌زودی", { exact: true })).toHaveCount(0);
   for (const [name, hash] of destinations) {
     await page.getByRole("link", { name, exact: true }).click();
@@ -21,7 +21,7 @@ test("all nine routes keep RTL themes navigation and meaningful unavailable cont
     await expect(page.locator(".trade-disabled")).toBeDisabled();
     await expect(page.locator(".operation-safety")).toContainText("executable_ready = false");
   }
-  await page.goto("/#robot-control");
+  await page.goto("/?view=demo#robot-control");
   for (const name of ["شروع worker — در دسترس نیست", "توقف worker — در دسترس نیست", "Refresh زنده — در دسترس نیست"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name, exact: true })).toHaveAttribute("title", /.+/);
@@ -31,7 +31,7 @@ test("all nine routes keep RTL themes navigation and meaningful unavailable cont
   for (const width of [390, 760, 1366]) {
     await page.setViewportSize({ width, height: 900 });
     for (const [, hash] of destinations) {
-      await page.goto("/#" + hash);
+      await page.goto("/?view=demo#" + hash);
       const overflow = await page.evaluate(() => [...document.querySelectorAll(".workspace *")].filter(e => { const r=e.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1; }).map(e => e.className).slice(0, 20));
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width} ${hash}: ${overflow}`).toBe(true);
     }
@@ -43,7 +43,7 @@ test("all nine routes keep RTL themes navigation and meaningful unavailable cont
 test("local redacted reports populate public/account views without network secrets or invented trading state", async ({ page }) => {
   const requests: string[] = [];
   page.on("request", request => { if (request.method() !== "GET" || !request.url().startsWith("http://127.0.0.1:5173/")) requests.push(request.url()); });
-  await page.goto("/#connections");
+  await page.goto("/?view=demo#connections");
   const publicReport = { mode: "PUBLIC_OBSERVATION_ONLY", status: "OBSERVED_BLOCKED", symbol: "BTCTMN", health: "RUNNING",
     action: "NO_TRADE", executable_ready: false, observed_at: 1792757067, decision_cutoff: 1792756800,
     orderbook: { best_bid: "99", best_ask: "101", spread_pct: "2" }, readiness_blockers: ["PE_UNAVAILABLE"], observation_failures: [],

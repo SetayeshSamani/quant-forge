@@ -23,10 +23,12 @@ Every executable action remains **NO_TRADE**, `executable_ready=false`.
 
 Saved public data → validation/independent consecutive segments → TP-1 technical
 assessment → risk/credit diagnostics → Shadow journal → **NO_TRADE**.
-The static frontend displays labelled presentation data and a separate reported
-historical summary, plus manually imported sanitized worker/preflight reports.
-It does not call Python, Wallex or an AI provider. Operational pages never invent
-account balances, orders or profit; absent evidence stays unavailable.
+The default frontend polls the real read-only Python observer API every 15
+seconds. It displays actual public-market/TP-1 reports, health and blockers.
+Private balances, credit, orders and profit stay unavailable. The legacy synthetic
+presentation/manual importer exists only at the explicit `?view=demo` URL.
+No credentials or private Wallex requests run in the browser. See the
+[connected local/API/Liara runbook](docs/OBSERVER_DASHBOARD.md).
 
 ## Run the UI
 
@@ -41,8 +43,9 @@ npm run build
 npm run preview
 ```
 
-Open the printed local URL. No API key, environment file, backend or database is
-needed. Build runs strict TypeScript checking. Optional existing browser smoke
+Open the printed local URL. Start the public Python API as described in the
+runbook for real data; without it the connected view shows an error, not DEMO.
+No API key or frontend environment file is needed. Build runs strict TypeScript checking. Optional existing browser smoke
 checks: `npm test` with Playwright Chromium installed, or set
 `$env:PW_BROWSER_CHANNEL = "msedge"` to use installed Edge.
 
@@ -87,7 +90,14 @@ per-step rejection reasons are not bundled; no independent rerun is claimed here
 The original three screens retain **DEMO** fixtures. The six operational pages
 use explicitly selected captured reports or unavailable states, separately from DEMO.
 
-## Deploy the static submission
+## Deployment modes
+
+For the functional connected dashboard, use the root Dockerfile and the
+[Python API/persistent-volume runbook](docs/OBSERVER_DASHBOARD.md); Liara preparation
+is included, deployment has not been performed. The static-only option below
+cannot run the observer/API and needs a separate same-origin reverse proxy.
+
+### Static-only presentation
 
 Use any static Vite-compatible host and select the reviewed release commit/branch:
 

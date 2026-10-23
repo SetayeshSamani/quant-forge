@@ -35,7 +35,9 @@ export function AppShell({
   sidebarOpen,
   setSidebarOpen,
   onNotifications,
+  demoView = true,
 }: {
+  demoView?: boolean;
   children: ReactNode;
   page: PageId;
   theme: Theme;
@@ -44,7 +46,7 @@ export function AppShell({
   setSidebarOpen: (open: boolean) => void;
   onNotifications: () => void;
 }) {
-  const demoPage = page === "overview" || page === "credit-risk" || page === "decision-center";
+  const demoPage = demoView && (page === "overview" || page === "credit-risk" || page === "decision-center");
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -128,7 +130,7 @@ export function AppShell({
             </button>
             <div>
               <h1>{PAGE_TITLES[page]}</h1>
-              <p>{demoPage ? "حساب اعتباری والکس · سناریوی نمایشی" : "گزارش محلی فقط‌خواندنی · بدون اتصال زنده"}</p>
+              <p>{demoPage ? "حساب اعتباری والکس · سناریوی نمایشی" : demoView ? "گزارش محلی فقط‌خواندنی · بدون اتصال زنده" : "API عمومی فقط‌خواندنی · بدون مجوز معامله"}</p>
             </div>
           </div>
           <div className="header-controls">
@@ -165,8 +167,8 @@ export function AppShell({
             </div>
             <button
               className="icon-button notification-button"
-              aria-label="هشدارهای نمایشی"
-              onClick={onNotifications}
+              aria-label={demoView ? "هشدارهای نمایشی" : "هشدارها و رویدادها"}
+              onClick={demoView ? onNotifications : () => {window.location.hash="alerts-events";}}
             >
               <Icon name="bell" size={26} />
               <i />

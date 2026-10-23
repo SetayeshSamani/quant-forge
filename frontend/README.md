@@ -12,26 +12,18 @@ npm run dev
 npm run build
 ```
 
-Open the URL printed by Vite (default http://127.0.0.1:5173).
-Theme persists locally when storage is available. All nine sidebar routes render.
-Overview, Credit & Risk, and the six-stage decision scenario use synthetic DEMO
-presentation fixtures, not account evidence or orders. Decision Center also shows
-a separate HISTORICAL / OFFLINE BTCTMN summary reported by the project owner:
-264 H1, 24 M15, 4 evaluated steps, 0 eligible, 0 errors, NO_TRADE. The original
-artifact, hashes, range and cutoff are not bundled; no live readiness is claimed.
-No API client, credentials, trading authorization or executable action exists.
-No backend endpoint is assumed. The six operational screens show explicit
-unavailable states or captured reports imported in Connections & Settings:
-Strategy & Market, Positions & Orders, Backtest & Analytics, Robot Control,
-Alerts & Events, Connections & Settings. Supported files: public worker
-`report.json`, public `status` JSON, sanitized `spot_preflight` JSON. Raw/private
-account responses and secret/header fields are rejected. Only allowlisted
-projections live in memory; reload clears them, with no upload or persistence.
-Counts, bid/ask and technical reasons come from the selected report; unknown
-balances, P&L, fees and current state are not invented. Imported files remain
-CAPTURED / UNVERIFIED. Start/Stop/live Refresh are disabled because no trusted
-management API is connected. Use the Python worker on its host; never browser keys.
-See [runtime and independent account read preflight](../docs/AGENT_RUNTIME.md).
+The default nine-route dashboard now connects to the Python public observer
+API at `/api/observer`; Vite proxies `/api` to http://127.0.0.1:8765. Start the
+API/public worker using [the connected dashboard runbook](../docs/OBSERVER_DASHBOARD.md).
+Refresh is automatic every 15 seconds with bounded timeout and explicit loading,
+error, stale and unavailable states. No DEMO financial fallback exists.
+
+Open `/?view=demo` explicitly for the separate legacy presentation screens/manual
+report importer. Synthetic portfolio, price, credit and decision values are
+labelled DEMO. They never appear in the default connected view. Private balances,
+orders, P&L and credit fields stay unavailable until a trusted authenticated
+account service exists. No browser credentials or Wallex requests are supported.
+Theme, RTL and navigation remain shared. Imported legacy reports stay in memory.
 
 Essential browser checks:
 
@@ -44,8 +36,10 @@ npm test
 ```
 
 `npm run check` validates strict TypeScript; build also runs this check.
-Static deployment: Node >=22.12, root `frontend`, install `npm ci`, build
-`npm run build`, publish `dist`. No server or environment variables are required.
+Static-only deployment builds `frontend/dist` but cannot supply the real API.
+For connected production, use the root Dockerfile/Python service and persistent
+observer volume described in the runbook. No frontend secrets or environment
+variables are required; API and UI share one origin.
 Hash navigation preserves direct links such as `/#decision-center`.
 
 Pending: trusted read-only runtime backend, verified account/risk contracts and

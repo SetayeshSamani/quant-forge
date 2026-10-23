@@ -13,7 +13,7 @@ test("credit evidence states never imply verified equity, capacity or execution"
     )
       unexpectedRequests.push(request.method() + " " + request.url());
   });
-  await page.goto("/#credit-risk");
+  await page.goto("/?view=demo#credit-risk");
   await expect(
     page.getByRole("heading", { name: "اعتبار و ریسک", exact: true }),
   ).toBeVisible();
@@ -85,7 +85,7 @@ test("credit evidence states never imply verified equity, capacity or execution"
 test("all three pages retain navigation, themes and responsive credit layout", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?view=demo");
   for (const [label, hash] of [
     ["اعتبار و ریسک", "credit-risk"],
     ["مرکز تصمیم", "decision-center"],

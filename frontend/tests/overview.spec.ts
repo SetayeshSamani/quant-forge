@@ -11,7 +11,7 @@ test("overview is demo-only and theme selection persists", async ({ page }) => {
     )
       externalRequests.push(request.url());
   });
-  await page.goto("/");
+  await page.goto("/?view=demo");
   await expect(
     page.getByRole("heading", { name: "نمای کلی", exact: true }),
   ).toBeVisible();
@@ -52,7 +52,7 @@ test("overview is demo-only and theme selection persists", async ({ page }) => {
 
 test("mobile navigation works without page overflow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/?view=demo");
   await page.getByRole("button", { name: "باز کردن فهرست" }).click();
   await expect(
     page.getByRole("button", { name: "باز کردن فهرست" }),
