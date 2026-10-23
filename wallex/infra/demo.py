@@ -1,6 +1,7 @@
 """Local no-order demo supervisor. Explicit start opts into public/readonly/AI.
 
-No exchange gateway is instantiated. Configuration flags cannot enable writes.
+No HTTPS order gateway is activated. Only the explicitly synthetic HTTP_MOCK
+gateway runs for the simulation. Configuration flags cannot enable real writes.
 Control files contain only local process metadata, never API keys or account IDs.
 """
 import argparse
@@ -79,21 +80,41 @@ def _diagnostics(settings,state,stop):
     until=time.monotonic()+30
     while not (state/'audit.sqlite').exists():
         if stop.wait(.25) or time.monotonic()>until:return
-    def publish(report=None):
+    def publish(report=None,venue=None):
         ok=report is not None and report.get('authenticated_reads_succeeded') is True
         payload={'mode':settings.trading_mode,'account':'PENDING' if report is None else 'AUTHENTICATED_READS_VERIFIED' if ok else 'BLOCKED',
             'scope':'DISCOVERY_MATCHED_HEADER_SCOPED_NOT_ECHOED' if report and report.get('discovery_identity_matched') is True else 'UNVERIFIED',
             'balances':'AVAILABLE_SERVER_SIDE_NOT_EQUITY' if ok else 'UNAVAILABLE',
-            'orders':'READ_VERIFIED_COVERAGE_UNVERIFIED' if ok else 'UNAVAILABLE',
-            'fees':'UNVERIFIED','market_rules':'FULL_LIMITS_UNVERIFIED','risk':'DIAGNOSTIC_ONLY',
+            'orders':'BOUNDED_HISTORY_CROSSCHECKED_NOT_ATOMIC' if venue else 'READ_VERIFIED_COVERAGE_UNVERIFIED' if ok else 'UNAVAILABLE',
+            'fees':'RATES_VERIFIED_ASSET_POLICY_PENDING' if venue else 'UNVERIFIED',
+            'market_rules':'MINIMUMS_VERIFIED_MAXIMUM_PENDING' if venue else 'FULL_LIMITS_UNVERIFIED','risk':'LIVE_ADMISSION_CONTEXT_REQUIRED',
             'execution':'HTTPS_IMPLEMENTED_LIVE_LOCKED','observed_at':int(time.time()),
-            'blockers':[] if report is None else report['blockers'],'action':'NO_TRADE','executable_ready':False}
+            'blockers':[] if report is None else list(dict.fromkeys([v for v in report['blockers'] if not venue or v not in ('ACTUAL_FEES_UNVERIFIED','ORDER_COVERAGE_UNVERIFIED')]+([] if not venue else venue['blockers']))),'action':'NO_TRADE','executable_ready':False}
         Ledger(state/'audit.sqlite').record_event('demo_readonly_status',account_id=PARTITION,
             run_id='local-demo',trace_id='sanitized-status',at=datetime.now(timezone.utc),payload=payload)
     try:
         publish()
         if stop.is_set():return
-        publish(check_configured_account(settings))
+        account_report=check_configured_account(settings)
+        publish(account_report)
+        from wallex.execution.preflight import configured_exchange,collect_venue,readiness_report
+        try:
+            exchange=configured_exchange(settings,clock=lambda:datetime.now(timezone.utc))
+            capture=collect_venue(exchange,symbol=settings.wallex_symbol,base_asset=settings.assets[0],quote_asset=settings.assets[1])
+            readiness=readiness_report(capture)
+            publish(account_report,readiness)
+        except Exception as error:
+            code=str(error)
+            readiness={'status':'BLOCKED','blockers':[code if re.fullmatch(r'[A-Z0-9_]{1,100}',code) else 'VENUE_READINESS_CAPTURE_FAILED'],
+                'action':'NO_TRADE','executable_ready':False}
+        Ledger(state/'audit.sqlite').record_event('execution_readiness_checked',account_id=PARTITION,
+            run_id='local-demo',trace_id='sanitized-status',at=datetime.now(timezone.utc),payload=readiness)
+        if stop.is_set():return
+        from wallex.execution.simulation import run_simulation
+        directory=state.parent/'execution-simulations'/uuid.uuid4().hex;directory.mkdir(parents=True)
+        simulated=run_simulation(directory/'simulation.sqlite',partial_exit=True)
+        Ledger(state/'audit.sqlite').record_event('execution_simulation_completed',account_id=PARTITION,
+            run_id='local-demo',trace_id='synthetic-execution',at=datetime.now(timezone.utc),payload=simulated)
         until=time.monotonic()+90
         while not stop.is_set():
             data=snapshot(state)

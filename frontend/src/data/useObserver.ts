@@ -8,6 +8,8 @@ export interface ObserverConnection {
   generatedAt: number | null; age: number | null; runtimeState: string;
   heartbeatAge: number | null; blockers: string[]; refresh: () => void;
   market: RuntimeEvidence | null; aiReviews:AiReview[]; localChecks:Record<string,string>;
+  executionReadiness:Record<string,string>; executionBlockers:string[]; executionObservedAt:number|null;
+  simulation:{states:string[];monitoring:string[];buys:number|null;sells:number|null;settlement:string}|null;
   steps: { cutoff: number | null; eligible: boolean; reasons: string[] }[];
 }
 const record = (v: unknown): Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -16,7 +18,7 @@ const codes = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is st
 export function useObserver(enabled: boolean): ObserverConnection {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<Omit<ObserverConnection,"refresh">>({ loading:true,error:null,status:"LOADING",checkedAt:null,
-    generatedAt:null,age:null,runtimeState:"UNAVAILABLE",heartbeatAge:null,blockers:[],market:null,steps:[],aiReviews:[],localChecks:{} });
+    generatedAt:null,age:null,runtimeState:"UNAVAILABLE",heartbeatAge:null,blockers:[],market:null,steps:[],aiReviews:[],localChecks:{},executionReadiness:{},executionBlockers:[],executionObservedAt:null,simulation:null });
   useEffect(() => {
     if (!enabled) return;
     let active=true, timer: ReturnType<typeof setTimeout>, controller: AbortController;
@@ -50,10 +52,17 @@ export function useObserver(enabled: boolean): ObserverConnection {
           const value=checks[key];
           if(typeof value==="string" && /^[A-Z][A-Z0-9_]{0,90}$/.test(value))localChecks[key]=value;
         }
+        const execution=record(data.execution_readiness),sim=record(data.execution_simulation);
+        const executionReadiness:Record<string,string>={};
+        for(const key of ["account","origin","fees","market_rules","coverage","quote","trade_permission"]){
+          const value=execution[key];if(typeof value==="string" && /^[A-Z][A-Z0-9_]{0,110}$/.test(value))executionReadiness[key]=value;
+        }
+        const simulation=sim.mode==="SIMULATION" && sim.transport==="HTTP_MOCK" && sim.evidence_kind==="synthetic_fixture" && sim.action==="NO_TRADE" && sim.executable_ready===false
+          ? {states:codes(sim.states),monitoring:codes(sim.exit_monitoring),buys:number(sim.buy_submissions),sells:number(sim.sell_submissions),settlement:sim.settlement==="MOCK_SETTLED" ? "MOCK_SETTLED" : "UNVERIFIED"} : null;
         if(active) setState({loading:false,error:response.ok ? null : "OBSERVER_UNAVAILABLE",status:data.data_status==="RECENT_CAPTURED" ? "RECENT_CAPTURED" : data.data_status==="STALE" ? "STALE" : "UNAVAILABLE",
           checkedAt:Math.floor(Date.now()/1000),generatedAt:number(data.generated_at),age:number(data.observation_age_seconds),
           runtimeState:typeof runtime.state==="string" && /^(STARTING|RUNNING|DEGRADED|STOPPED|FAILED)$/.test(runtime.state) ? runtime.state : "UNAVAILABLE",
-          localChecks,aiReviews,heartbeatAge:number(runtime.heartbeat_age_seconds),blockers:codes(data.blockers),market:parsed as RuntimeEvidence | null,
+          localChecks,aiReviews,executionReadiness,executionBlockers:codes(execution.blockers),executionObservedAt:number(execution.observed_at),simulation,heartbeatAge:number(runtime.heartbeat_age_seconds),blockers:codes(data.blockers),market:parsed as RuntimeEvidence | null,
           steps:sourceSteps.map(value => {const step=record(value), tech=record(step.technical_evidence); return {cutoff:number(step.as_of),eligible:step.technical_eligible===true,
             reasons:[...codes(record(tech.trend).reasons),...codes(record(tech.pullback).reasons),...codes(step.blockers)]};})});
       } catch {

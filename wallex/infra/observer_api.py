@@ -137,12 +137,32 @@ def _demo_projection(value):
         "account":{"PENDING","AUTHENTICATED_READS_VERIFIED","BLOCKED","UNAVAILABLE"},
         "scope":{"DISCOVERY_MATCHED_HEADER_SCOPED_NOT_ECHOED","UNVERIFIED"},
         "balances":{"AVAILABLE_SERVER_SIDE_NOT_EQUITY","UNAVAILABLE"},
-        "orders":{"READ_VERIFIED_COVERAGE_UNVERIFIED","UNAVAILABLE"},
-        "fees":{"UNVERIFIED"},"market_rules":{"FULL_LIMITS_UNVERIFIED"},
-        "risk":{"DIAGNOSTIC_ONLY"},"execution":{"HTTPS_IMPLEMENTED_LIVE_LOCKED"}}
+        "orders":{"READ_VERIFIED_COVERAGE_UNVERIFIED","BOUNDED_HISTORY_CROSSCHECKED_NOT_ATOMIC","UNAVAILABLE"},
+        "fees":{"UNVERIFIED","RATES_VERIFIED_ASSET_POLICY_PENDING"},"market_rules":{"FULL_LIMITS_UNVERIFIED","MINIMUMS_VERIFIED_MAXIMUM_PENDING"},
+        "risk":{"DIAGNOSTIC_ONLY","LIVE_ADMISSION_CONTEXT_REQUIRED"},"execution":{"HTTPS_IMPLEMENTED_LIVE_LOCKED"}}
     return {**{key:value[key] if type(value.get(key)) is str and value[key] in choices else "UNAVAILABLE" for key,choices in allowed.items()},
             "observed_at":_stamp(value.get("observed_at")),"blockers":_codes(value.get("blockers")),
             "action":"NO_TRADE","executable_ready":False}
+
+
+def _execution_projection(raw, *, simulation=False):
+    raw=_object(raw)
+    if simulation:
+        if raw.get('mode')!='SIMULATION' or raw.get('transport')!='HTTP_MOCK' or raw.get('evidence_kind')!='synthetic_fixture':return None
+        return {'mode':'SIMULATION','transport':'HTTP_MOCK','evidence_kind':'synthetic_fixture',
+            'states':_codes(raw.get('states')),'exit_monitoring':_codes(raw.get('exit_monitoring')),
+            **{key:raw[key] if type(raw.get(key)) is int and 0<=raw[key]<=10000 else None for key in ('buy_submissions','sell_submissions','audit_events')},
+            'settlement':'MOCK_SETTLED' if raw.get('settlement')=='MOCK_SETTLED' else 'UNVERIFIED',
+            'action':'NO_TRADE','executable_ready':False}
+    allowed={'account':{'DISCOVERY_MATCHED_DOCUMENTED_HEADER_SCOPE'},'origin':{'HTTPS','HTTP_MOCK'},
+        'fees':{'AUTHENTICATED_MAKER_TAKER_RATES_VERIFIED'},
+        'market_rules':{'PRECISION_MINIMUMS_VERIFIED_MAXIMUM_UNAVAILABLE','PRECISION_MINIMUMS_MAX_QUANTITY_VERIFIED'},
+        'coverage':{'ALL_ORDERS_TRADES_PROVIDER_END_OBSERVED_DOUBLE_CHECKED_NOT_ATOMIC'},
+        'quote':{'UNCROSSED_LOCAL_RECEIPT_ONLY_NO_SOURCE_EVENT_TIME'}}
+    # Private counts/amounts/IDs and hashes of private responses are not public.
+    return {**{k:raw[k] if type(raw.get(k)) is str and raw[k] in values else 'UNAVAILABLE' for k,values in allowed.items()},
+        'observed_at':_stamp(raw.get('observed_at')),'blockers':_codes(raw.get('blockers')),
+        'trade_permission':'UNVERIFIED','action':'NO_TRADE','executable_ready':False}
 
 
 def snapshot(state_dir, *, now=None):
@@ -155,7 +175,7 @@ def snapshot(state_dir, *, now=None):
     result = {"mode": MODE, "status": "PERSISTED_STATUS_NOT_LIVENESS_PROOF", "api_schema": 1,
               "action": "NO_TRADE", "executable_ready": False, "generated_at": now, "source_commit": _revision(),
               "data_status": "UNAVAILABLE", "observation_age_seconds": None,
-              "last_observation": None, "ai_review": None, "local_readonly_checks": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
+              "last_observation": None, "ai_review": None, "local_readonly_checks": None, "execution_readiness": None,"execution_simulation": None, "runtime": {"state": "UNAVAILABLE", "heartbeat_at": None,
                   "heartbeat_age_seconds": None, "process_liveness": "UNVERIFIED"},
               "blockers": list(BLOCKERS), "private_account_api": "NOT_EXPOSED_REQUIRES_AUTHENTICATED_BACKEND"}
     try:
@@ -184,12 +204,16 @@ def snapshot(state_dir, *, now=None):
                     raise ValueError("OBSERVER_RECORD_TOO_LARGE")
                 return _decode(row[0]), int(datetime.fromisoformat(row[1]).timestamp()), row[2]
             local_checks=latest(("demo_readonly_status",))
+            execution = latest(("execution_readiness_checked",))
+            simulation = latest(("execution_simulation_completed",))
             ai = latest(("public_tp1_ai_review",))
             observation = latest(("observer_cycle_completed",))
             heartbeat = latest(("observer_heartbeat",))
             lifecycle = latest(("observer_started", "observer_stopped", "observer_failed"))
         if local_checks:
             result["local_readonly_checks"]=_demo_projection(local_checks[0])
+        if execution:result["execution_readiness"]=_execution_projection(execution[0])
+        if simulation:result["execution_simulation"]=_execution_projection(simulation[0],simulation=True)
         if ai:
             result["ai_review"] = _ai_projection(ai[0], config.symbol, now)
         if observation:

@@ -9,6 +9,13 @@ export function BackendStatus({ connection:c }: { connection:ObserverConnection 
     <p role="status">{c.error ? `خطای اتصال: ${c.error}؛ آخرین دادهٔ دریافت‌شده ممکن است قدیمی باشد.` : c.loading ? "در حال دریافت گزارش از API…" : "گزارش observer از API خوانده شد؛ refresh خودکار هر ۱۵ ثانیه."}</p>
     <Fields rows={[["آخرین بررسی اتصال · UTC",utc(c.checkedAt)],["زمان پاسخ سرور · UTC",utc(c.generatedAt)],["سن مشاهده در پاسخ · ثانیه",c.age],["وضعیت ثبت‌شدهٔ worker",c.runtimeState],["سن heartbeat · ثانیه",c.heartbeatAge]]}/>
     <Fields rows={[["حالت پیکربندی‌شده",c.localChecks.mode ?? "UNAVAILABLE"],["خواندن حساب prop",c.localChecks.account ?? "PENDING"],["scope حساب",c.localChecks.scope ?? "UNVERIFIED"],["موجودی خصوصی",c.localChecks.balances ?? "UNAVAILABLE"],["خواندن سفارش‌ها",c.localChecks.orders ?? "UNAVAILABLE"],["کارمزد / قوانین بازار",`${c.localChecks.fees ?? "UNVERIFIED"} / ${c.localChecks.market_rules ?? "UNVERIFIED"}`],["Risk / Execution",`${c.localChecks.risk ?? "DIAGNOSTIC_ONLY"} / ${c.localChecks.execution ?? "LIVE_LOCKED"}`]]}/>
+    <h3>اجرای واقعی · نتیجهٔ بررسی فقط‌خواندنی</h3>
+    <Fields rows={[["مجوز معامله",c.executionReadiness.trade_permission ?? "UNVERIFIED"],["کارمزد حساب",c.executionReadiness.fees ?? "UNAVAILABLE"],["قوانین بازار",c.executionReadiness.market_rules ?? "UNAVAILABLE"],["پوشش سفارش‌ها و معاملات",c.executionReadiness.coverage ?? "UNVERIFIED"],["تازگی قیمت اجرایی",c.executionReadiness.quote ?? "UNVERIFIED"],["زمان برداشت حساب · UTC",utc(c.executionObservedAt)]]}/>
+    <Reasons values={c.executionBlockers}/>
+    {c.simulation && <><h3>SIMULATION · BUY → FILL → SELL · دادهٔ مصنوعی</h3>
+      <Fields rows={[["Transport","HTTP_MOCK · هیچ سفارش واقعی ارسال نشده"],["ارسال مصنوعی BUY / SELL",`${c.simulation.buys} / ${c.simulation.sells}`],["تسویهٔ مصنوعی",c.simulation.settlement]]}/>
+      <Reasons values={c.simulation.states}/><Reasons values={c.simulation.monitoring}/>
+      <p>این چرخه بازیابی پس از timeout، fill جزئی، خروج حفاظتی و تسویه را با پاسخ‌های مصنوعی شبکه نشان می‌دهد؛ شاهد معامله یا سود واقعی نیست.</p></>}
     <p>RECENT_CAPTURED فقط سن دریافت محلی است؛ تازگی رویداد بازار و زنده‌بودن process مستقلاً تأیید نشده‌اند. ارزیابی‌ها باز‌محاسبهٔ تاریخی کندل‌های بسته‌اند، نه سیگنال اجرایی LIVE. هیچ دادهٔ خصوصی حساب از این API منتشر نمی‌شود.</p>
     <button className="subtle-button" disabled={c.loading} onClick={c.refresh}>دریافت دوباره از API</button>
     <a className="subtle-button" href="?view=demo#overview">مشاهدهٔ جداگانهٔ DEMO</a>

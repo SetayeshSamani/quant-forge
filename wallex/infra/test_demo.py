@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from .config import load_settings
 from .demo import VERSION, stop_demo
-from .observer_api import _demo_projection
+from .observer_api import _demo_projection,_execution_projection
 
 
 class DemoTests(unittest.TestCase):
@@ -41,3 +41,10 @@ class DemoTests(unittest.TestCase):
             self.assertNotIn('synthetic',json.dumps(projected))
             self.assertEqual(projected['action'],'NO_TRADE')
             self.assertFalse(projected['executable_ready'])
+
+            public=_execution_projection({'account_id':'synthetic-private-identity','open_orders_observed':23,
+                'balances':{'TMN':'123'},'origin':'HTTPS','fees':'AUTHENTICATED_MAKER_TAKER_RATES_VERIFIED'})
+            self.assertNotIn('synthetic',json.dumps(public))
+            self.assertNotIn('open_orders_observed',public)
+            self.assertNotIn('balances',public)
+            self.assertIsNone(_execution_projection({'mode':'LIVE','transport':'HTTPS'},simulation=True))

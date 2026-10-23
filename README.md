@@ -16,8 +16,9 @@ API refresh does not repeat paid inference. Private amounts/IDs remain server-si
 `TRADING_MODE` labels configuration only: this demo always remains **NO_TRADE**,
 including when LIVE flags are configured. HTTPS BUY/SELL, recovery and fee-aware
 settlement are implemented and mock-tested, but actual submission remains blocked
-by diagnostic-only Risk authority and missing verified permission/fee/market/
-complete-exposure evidence. A limit-based protective exit cannot guarantee a fill.
+by missing reviewed permission, credit/fee policies, maximum venue limits,
+source-event quote freshness and verified equity/loss history. Explicit execution
+admission reuses the unchanged diagnostic Risk checks; it does not manufacture evidence. A limit-based protective exit cannot guarantee a fill.
 
 # QuantForge — Wallex Agentic AI Hackathon
 

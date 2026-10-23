@@ -3,6 +3,8 @@ import { expect,test } from "@playwright/test";
 function fixture(status="RECENT_CAPTURED") {
   return {mode:"PUBLIC_OBSERVATION_ONLY",status:"PERSISTED_STATUS_NOT_LIVENESS_PROOF",api_schema:1,action:"NO_TRADE",executable_ready:false,
     ai_review:{records:[{status:"OK",advisory_decision:"REVIEW",requested_model:"gpt-5.4-mini",response_model:"gpt-5.4-mini-synthetic",evidence_hash:"a".repeat(64),source_commit:"b".repeat(40),as_of:1792762200,completed_at:1792763000,inference_source:"SYNTHETIC_TEST_TRANSPORT",evidence_kind:"synthetic_fixture",reason_codes:["REVIEW_REQUIRED"],action:"NO_TRADE",executable_ready:false}]},
+    execution_readiness:{origin:"HTTP_MOCK",fees:"AUTHENTICATED_MAKER_TAKER_RATES_VERIFIED",trade_permission:"UNVERIFIED",observed_at:1792762980,blockers:["PUBLIC_BOOK_PROVIDER_EVENT_TIME_UNAVAILABLE"],action:"NO_TRADE",executable_ready:false},
+    execution_simulation:{mode:"SIMULATION",transport:"HTTP_MOCK",evidence_kind:"synthetic_fixture",states:["UNKNOWN","PARTIAL","FILLED","CANCELED"],exit_monitoring:["EXIT_TIMEOUT_CANCEL_REPRICE_REQUIRES_EXACT_APPROVAL"],buy_submissions:1,sell_submissions:2,settlement:"MOCK_SETTLED",action:"NO_TRADE",executable_ready:false},
     generated_at:1792763000,data_status:status,observation_age_seconds:status==="STALE" ? 1800 : 20,
     runtime:{state:"RUNNING",heartbeat_age_seconds:20,process_liveness:"UNVERIFIED"},blockers:["PE_UNAVAILABLE","CREDIT_PLAN_UNVERIFIED"],
     last_observation:{mode:"PUBLIC_OBSERVATION_ONLY",action:"NO_TRADE",executable_ready:false,symbol:"BTCTMN",observed_at:1792762980,decision_cutoff:1792762200,health:"RUNNING",
@@ -17,6 +19,9 @@ test("default nine-route backend view uses public evidence without demo financia
   await page.route("**/api/observer",route=>route.fulfill({json:fixture()}));
   await page.goto("/");
   await expect(page.getByText("264 / 24",{exact:true})).toBeVisible();
+  await expect(page.getByRole("heading",{name:"SIMULATION · BUY → FILL → SELL · دادهٔ مصنوعی"})).toBeVisible();
+  await expect(page.locator(".workspace")).toContainText("AUTHENTICATED_MAKER_TAKER_RATES_VERIFIED");
+  await expect(page.locator(".workspace")).toContainText("MOCK_SETTLED");
   await expect(page.locator(".workspace")).not.toContainText("12,067.20");
   for(const [label,hash] of [["نمای کلی","overview"],["اعتبار و ریسک","credit-risk"],["استراتژی و بازار","strategy-market"],["مرکز تصمیم","decision-center"],["موقعیت‌ها و سفارش‌ها","positions-orders"],["بک‌تست و تحلیل","backtest-analytics"],["کنترل ربات","robot-control"],["هشدارها و رویدادها","alerts-events"],["اتصال و تنظیمات","connections"]]) {
     await page.getByRole("link",{name:label,exact:true}).click();
