@@ -327,7 +327,7 @@ def main(argv=None):
             signal.signal(signum, lambda *_: stop.set())
         report = run_observer(config, fetch_public=args.fetch_public, once=args.once,
                               max_cycles=args.max_cycles, stop=stop)
-        return int(report["status"] == "OBSERVATION_DEGRADED")
+        return 0 if stop.is_set() else int(report["status"] == "OBSERVATION_DEGRADED")
     except Exception as error:
         print(canonical_json(_safe("RUNTIME_STOPPED_FAIL_CLOSED", failure=_failure(error))))
         return 1

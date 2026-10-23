@@ -136,6 +136,14 @@ class AgentRuntimeTests(unittest.TestCase):
             run(cfg, once=False, max_cycles=10, clock=lambda: AS_OF + 900, stop=stop, emit=emit)
             self.assertEqual(len(emitted), 1)
             self.assertEqual(Ledger(cfg.state_dir / "audit.sqlite").events()[-1].kind, "observer_stopped")
+            # An intentional stop must not signal failure to Restart=on-failure.
+            def stopped_worker(*args, **options):
+                options["stop"].set()
+                return agent._safe("OBSERVATION_DEGRADED")
+            with patch.object(agent, "run_observer", side_effect=stopped_worker), \
+                 patch.object(agent.signal, "signal"):
+                self.assertEqual(agent.main(["observe", "--fetch-public", "--state-dir", str(cfg.state_dir),
+                                             "--symbol", "BTCTMN", "--base", "BTC", "--quote", "TMN"]), 0)
 
     def test_existing_interactive_preflight_preserves_401_and_never_persists_secrets(self):
         _, _, payloads, _ = setup_fixture()
