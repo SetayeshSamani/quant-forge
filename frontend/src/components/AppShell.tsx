@@ -3,19 +3,22 @@ import { Icon, type IconName } from "./Icon";
 import { Badge } from "./Panel";
 import { DEMO } from "../data/demo";
 export type Theme = "dark" | "light";
-const navigation: readonly { label: string; icon: IconName }[] = [
-  { label: "نمای کلی", icon: "home" },
-  { label: "اعتبار و ریسک", icon: "shield" },
-  { label: "استراتژی و بازار", icon: "chart" },
-  { label: "مرکز تصمیم", icon: "nodes" },
-  { label: "موقعیت‌ها و سفارش‌ها", icon: "orders" },
-  { label: "بک‌تست و تحلیل", icon: "pie" },
-  { label: "کنترل ربات", icon: "bot" },
-  { label: "هشدارها و رویدادها", icon: "bell" },
-  { label: "اتصال و تنظیمات", icon: "settings" },
-];
+export type PageId = "overview" | "decision-center";
+const navigation: readonly { label: string; icon: IconName; page?: PageId }[] =
+  [
+    { label: "نمای کلی", icon: "home", page: "overview" },
+    { label: "اعتبار و ریسک", icon: "shield" },
+    { label: "استراتژی و بازار", icon: "chart" },
+    { label: "مرکز تصمیم", icon: "nodes", page: "decision-center" },
+    { label: "موقعیت‌ها و سفارش‌ها", icon: "orders" },
+    { label: "بک‌تست و تحلیل", icon: "pie" },
+    { label: "کنترل ربات", icon: "bot" },
+    { label: "هشدارها و رویدادها", icon: "bell" },
+    { label: "اتصال و تنظیمات", icon: "settings" },
+  ];
 export function AppShell({
   children,
+  page,
   theme,
   setTheme,
   sidebarOpen,
@@ -23,6 +26,7 @@ export function AppShell({
   onNotifications,
 }: {
   children: ReactNode;
+  page: PageId;
   theme: Theme;
   setTheme: (theme: Theme) => void;
   sidebarOpen: boolean;
@@ -55,13 +59,13 @@ export function AppShell({
         </a>
         <nav aria-label="بخش‌های برنامه">
           <ul>
-            {navigation.map(({ label, icon }, index) => (
+            {navigation.map(({ label, icon, page: destination }) => (
               <li key={label}>
-                {index === 0 ? (
+                {destination ? (
                   <a
-                    href="#overview"
-                    className="nav-item active"
-                    aria-current="page"
+                    href={`#${destination}`}
+                    className={`nav-item ${page === destination ? "active" : ""}`}
+                    aria-current={page === destination ? "page" : undefined}
                     onClick={() => setSidebarOpen(false)}
                   >
                     <Icon name={icon} size={25} />
@@ -98,7 +102,7 @@ export function AppShell({
           <small>پلتفرم مستقل</small>
         </div>
       </aside>
-      <div className="workspace" id="overview">
+      <div className="workspace" id={page}>
         <header className="topbar">
           <div className="page-heading">
             <button
@@ -111,7 +115,7 @@ export function AppShell({
               <Icon name="menu" />
             </button>
             <div>
-              <h1>نمای کلی</h1>
+              <h1>{page === "decision-center" ? "مرکز تصمیم" : "نمای کلی"}</h1>
               <p>حساب اعتباری والکس · سناریوی نمایشی</p>
             </div>
           </div>

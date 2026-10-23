@@ -1,5 +1,8 @@
 import type { CSSProperties } from "react";
 const paths = {
+  ban: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM5 5l14 14",
+  chevron: "m15 5-7 7 7 7",
+  play: "m6 3 15 9-15 9Z",
   home: "m3 10 9-8 9 8M5 9v12h5v-7h4v7h5V9",
   shield: "m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6Zm0 5v6m-3-3h6",
   chart: "M3 21h19M5 18V9h3v9m4 0V3h3v15m4 0v-6h3v6",

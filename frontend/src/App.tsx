@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { AppShell, type Theme } from "./components/AppShell";
+import { AppShell, type Theme, type PageId } from "./components/AppShell";
 import { Icon } from "./components/Icon";
 import { Overview } from "./pages/Overview";
+import { DecisionCenter } from "./pages/DecisionCenter";
+
+const pageFromHash = (): PageId =>
+  window.location.hash === "#decision-center" ? "decision-center" : "overview";
 export function App() {
+  const [page, setPage] = useState<PageId>(pageFromHash);
+  useEffect(() => {
+    const navigate = () => setPage(pageFromHash());
+    window.addEventListener("hashchange", navigate);
+    return () => window.removeEventListener("hashchange", navigate);
+  }, []);
+  useEffect(() => {
+    document.title = `${page === "decision-center" ? "مرکز تصمیم" : "نمای کلی"} | QuantForge DEMO`;
+  }, [page]);
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.dataset.theme === "light" ? "light" : "dark",
   );
@@ -44,13 +57,18 @@ export function App() {
   return (
     <>
       <AppShell
+        page={page}
         theme={theme}
         setTheme={setTheme}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
         onNotifications={() => showNotice("notifications")}
       >
-        <Overview onReviewRisk={() => showNotice("risk")} />
+        {page === "decision-center" ? (
+          <DecisionCenter />
+        ) : (
+          <Overview onReviewRisk={() => showNotice("risk")} />
+        )}
       </AppShell>
       <dialog
         ref={dialog}

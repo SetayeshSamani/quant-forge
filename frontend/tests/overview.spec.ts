@@ -26,8 +26,8 @@ test("overview is demo-only and theme selection persists", async ({ page }) => {
   }
   await expect(page.getByRole("note")).toContainText("داده‌های نمایشی");
   await expect(
-    page.getByRole("button", { name: "مرکز تصمیم؛ به‌زودی" }),
-  ).toBeDisabled();
+    page.getByRole("link", { name: "مرکز تصمیم", exact: true }),
+  ).toHaveAttribute("href", "#decision-center");
   await page.getByRole("button", { name: "پوسته روشن" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();
