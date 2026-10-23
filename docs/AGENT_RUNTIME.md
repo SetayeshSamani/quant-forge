@@ -16,7 +16,12 @@ The selected active, unsuspended prop identity matched; balances validated and
 quote availability was positive. Zero open orders were observed, but complete
 coverage was not established. The initial collector incorrectly required credit-
 style pagination fields from Spot `result_info`; that assumption is removed.
-The revised collector is synthetic-test verified; an owner rerun is still needed.
+The owner reran the revised collector successfully: authenticated_reads_succeeded
+was true and all three scoped GETs returned 200. Spot metadata contained integer
+page/count/per_page fields but no total_count, confirming the original mismatch.
+Order coverage remains UNVERIFIED_PROVIDER_PAGINATION; zero observed orders is
+not an atomic flat-account assertion. This is owner-supplied redacted evidence,
+not an independently repeated private request by Codex.
 No private request or key was handled by Codex. These reads establish neither
 trading permission nor risk authorization; the original package 401 is separate.
 
